@@ -1,5 +1,8 @@
 import { App } from "@microsoft/teams.apps";
-import { AdaptiveCardInvokeResponse } from "@microsoft/teams.apps";
+import {
+  AdaptiveCardActionErrorResponse,
+  AdaptiveCardActionMessageResponse,
+} from "@microsoft/teams.api";
 import { DevtoolsPlugin } from "@microsoft/teams.dev";
 import { parseLeaveIntent } from "./app/groqParser";
 import {
