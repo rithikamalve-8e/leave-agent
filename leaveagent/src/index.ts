@@ -60,7 +60,7 @@ app.on("message", async ({ activity, send, api }) => {
     conversationId: activity.conversation.id,
     serviceUrl:     activity.serviceUrl,
     tenantId:       activity.conversation.tenantId,
-    botId:          activity.recipient.id,
+    botId: activity.recipient?.id ?? "bot",
   });
 
   const cmd = userMessage.toLowerCase();
