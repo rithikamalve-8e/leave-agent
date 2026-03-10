@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+dotenv.config({ path: "env/.env.local" });
+
 import { App } from "@microsoft/teams.apps";
 import {
   AdaptiveCardActionErrorResponse,
