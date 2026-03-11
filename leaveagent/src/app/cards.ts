@@ -1,23 +1,5 @@
-/**
- * cards.ts
- * All Adaptive Card builders for LeaveAgent.
- *
- * Two categories of functions:
- *
- * 1. build*Card()  — returns CardActivity for use with send()
- *    Shape: { type: "message", attachments: [{ contentType, content: IAdaptiveCard }] }
- *
- * 2. build*CardContent() — returns IAdaptiveCard for use in:
- *    - card.action return value (AdaptiveCardActionCardResponse.value)
- *    - api.conversations.activities().create() attachment content
- */
-
 import { IAdaptiveCard } from "@microsoft/teams.cards";
 import { LeaveRecord } from "./excelManager";
-
-// ─────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────
 
 export interface ApprovalCardData {
   employeeName: string;
@@ -35,7 +17,6 @@ export interface SimpleCardData {
   displayDate: string;
 }
 
-// Shape that send() accepts for adaptive cards
 export interface CardActivity {
   type: "message";
   attachments: Array<{
@@ -43,10 +24,6 @@ export interface CardActivity {
     content: IAdaptiveCard;
   }>;
 }
-
-// ─────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────
 
 export function formatDisplayDate(isoDate: string): string {
   if (!isoDate) return "Unknown date";
@@ -72,30 +49,14 @@ export function getTypeLabel(type: string): string {
   }
 }
 
-export function getTypeEmoji(type: string): string {
-  switch (type?.toUpperCase()) {
-    case "WFH":   return "🏠";
-    case "LEAVE": return "🌴";
-    case "SICK":  return "🤒";
-    default:      return "📋";
-  }
-}
-
 function wrap(content: IAdaptiveCard): CardActivity {
   return {
     type: "message",
-    attachments: [
-      {
-        contentType: "application/vnd.microsoft.card.adaptive",
-        content,
-      },
-    ],
+    attachments: [{ contentType: "application/vnd.microsoft.card.adaptive", content }],
   };
 }
 
-// ─────────────────────────────────────────────
-// Confirmation Card  (sent to employee)
-// ─────────────────────────────────────────────
+// ── Confirmation Card ──────────────────────────────────────────────────────
 
 export function buildConfirmationCard(
   employeeName: string,
@@ -110,7 +71,7 @@ export function buildConfirmationCard(
     body: [
       {
         type: "TextBlock",
-        text: `${getTypeEmoji(requestType)} Request Submitted`,
+        text: "Request Submitted",
         weight: "Bolder",
         size: "Large",
         color: "Accent",
@@ -122,7 +83,7 @@ export function buildConfirmationCard(
           { title: "Type",     value: getTypeLabel(requestType) },
           { title: "Date",     value: displayDate },
           { title: "Duration", value: duration },
-          { title: "Status",   value: "⏳ Awaiting manager approval" },
+          { title: "Status",   value: "Awaiting manager approval" },
         ],
       },
       {
@@ -136,11 +97,7 @@ export function buildConfirmationCard(
   });
 }
 
-// ─────────────────────────────────────────────
-// Approval Card content  (raw, for proactive API call to manager)
-// Returns only the card content object — NOT wrapped in CardActivity
-// because it's sent via api.conversations.activities().create()
-// ─────────────────────────────────────────────
+// ── Approval Card ──────────────────────────────────────────────────────────
 
 export function buildApprovalCardContent(data: ApprovalCardData): IAdaptiveCard {
   return {
@@ -150,7 +107,7 @@ export function buildApprovalCardContent(data: ApprovalCardData): IAdaptiveCard 
     body: [
       {
         type: "TextBlock",
-        text: `${getTypeEmoji(data.requestType)} Leave Approval Required`,
+        text: "Leave Approval Required",
         weight: "Bolder",
         size: "Large",
         color: "Warning",
@@ -158,11 +115,11 @@ export function buildApprovalCardContent(data: ApprovalCardData): IAdaptiveCard 
       {
         type: "FactSet",
         facts: [
-          { title: "👤 Employee", value: data.employeeName },
-          { title: "📧 Email",    value: data.employeeEmail },
-          { title: "📋 Type",     value: getTypeLabel(data.requestType) },
-          { title: "📅 Date",     value: data.displayDate },
-          { title: "⏱️ Duration", value: data.duration },
+          { title: "Employee", value: data.employeeName },
+          { title: "Email",    value: data.employeeEmail },
+          { title: "Type",     value: getTypeLabel(data.requestType) },
+          { title: "Date",     value: data.displayDate },
+          { title: "Duration", value: data.duration },
         ],
       },
       {
@@ -174,9 +131,8 @@ export function buildApprovalCardContent(data: ApprovalCardData): IAdaptiveCard 
     ],
     actions: [
       {
-        type: "Action.Execute",
-        title: "✅ Approve",
-        verb: "approveLeave",
+        type: "Action.Submit",
+        title: "Approve",
         style: "positive",
         data: {
           action: "approve",
@@ -186,9 +142,8 @@ export function buildApprovalCardContent(data: ApprovalCardData): IAdaptiveCard 
         },
       },
       {
-        type: "Action.Execute",
-        title: "❌ Reject",
-        verb: "rejectLeave",
+        type: "Action.Submit",
+        title: "Reject",
         style: "destructive",
         data: {
           action: "reject",
@@ -201,10 +156,7 @@ export function buildApprovalCardContent(data: ApprovalCardData): IAdaptiveCard 
   };
 }
 
-// ─────────────────────────────────────────────
-// Approved / Rejected card  (replaces manager's card — return as raw content)
-// These are returned directly from card.action handler as AdaptiveCardInvokeResponse value
-// ─────────────────────────────────────────────
+// ── Approved Card ──────────────────────────────────────────────────────────
 
 export function buildApprovedCardContent(data: SimpleCardData, approvedBy: string): IAdaptiveCard {
   return {
@@ -214,7 +166,7 @@ export function buildApprovedCardContent(data: SimpleCardData, approvedBy: strin
     body: [
       {
         type: "TextBlock",
-        text: `${getTypeEmoji(data.requestType)} Request Approved ✅`,
+        text: "Request Approved",
         weight: "Bolder",
         size: "Large",
         color: "Good",
@@ -233,6 +185,8 @@ export function buildApprovedCardContent(data: SimpleCardData, approvedBy: strin
   };
 }
 
+// ── Rejected Card ──────────────────────────────────────────────────────────
+
 export function buildRejectedCardContent(data: SimpleCardData, rejectedBy: string): IAdaptiveCard {
   return {
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -241,7 +195,7 @@ export function buildRejectedCardContent(data: SimpleCardData, rejectedBy: strin
     body: [
       {
         type: "TextBlock",
-        text: `${getTypeEmoji(data.requestType)} Request Rejected ❌`,
+        text: "Request Rejected",
         weight: "Bolder",
         size: "Large",
         color: "Attention",
@@ -260,9 +214,7 @@ export function buildRejectedCardContent(data: SimpleCardData, rejectedBy: strin
   };
 }
 
-// ─────────────────────────────────────────────
-// Status Card content  (DMed to employee — raw for API call)
-// ─────────────────────────────────────────────
+// ── Status Card ────────────────────────────────────────────────────────────
 
 export function buildStatusCardContent(
   requestType: string,
@@ -278,9 +230,7 @@ export function buildStatusCardContent(
     body: [
       {
         type: "TextBlock",
-        text: isApproved
-          ? `${getTypeEmoji(requestType)} Your request was Approved! ✅`
-          : `${getTypeEmoji(requestType)} Your request was Rejected ❌`,
+        text: isApproved ? "Your request was Approved" : "Your request was Rejected",
         weight: "Bolder",
         size: "Large",
         color: isApproved ? "Good" : "Attention",
@@ -296,7 +246,7 @@ export function buildStatusCardContent(
       {
         type: "TextBlock",
         text: isApproved
-          ? "Your leave is confirmed. Enjoy! 🎉"
+          ? "Your leave is confirmed."
           : "Please speak with your manager if you have questions.",
         wrap: true,
         size: "Small",
@@ -306,9 +256,7 @@ export function buildStatusCardContent(
   };
 }
 
-// ─────────────────────────────────────────────
-// Announcement Card  (sent via send() after approval)
-// ─────────────────────────────────────────────
+// ── Announcement Card ──────────────────────────────────────────────────────
 
 export function buildAnnouncementCard(record: LeaveRecord): CardActivity {
   return wrap({
@@ -317,38 +265,27 @@ export function buildAnnouncementCard(record: LeaveRecord): CardActivity {
     version: "1.4",
     body: [
       {
-        type: "ColumnSet",
-        columns: [
-          {
-            type: "Column",
-            width: "auto",
-            items: [{ type: "TextBlock", text: getTypeEmoji(record.type), size: "ExtraLarge" }],
-          },
-          {
-            type: "Column",
-            width: "stretch",
-            items: [
-              { type: "TextBlock", text: "Workforce Availability Update", weight: "Bolder", color: "Accent" },
-              { type: "TextBlock", text: `${record.employee} — ${getTypeLabel(record.type)}`, wrap: true },
-            ],
-          },
-        ],
+        type: "TextBlock",
+        text: "Workforce Availability Update",
+        weight: "Bolder",
+        size: "Large",
+        color: "Accent",
       },
       {
         type: "FactSet",
         facts: [
-          { title: "📅 Date",     value: formatDisplayDate(record.date) },
-          { title: "⏱️ Duration", value: record.duration === "half_day" ? "Half Day" : "Full Day" },
-          { title: "✅ Approved", value: record.approved_by ?? "Manager" },
+          { title: "Employee", value: record.employee },
+          { title: "Type",     value: getTypeLabel(record.type) },
+          { title: "Date",     value: formatDisplayDate(record.date) },
+          { title: "Duration", value: record.duration === "half_day" ? "Half Day" : "Full Day" },
+          { title: "Approved By", value: record.approved_by ?? "Manager" },
         ],
       },
     ],
   });
 }
 
-// ─────────────────────────────────────────────
-// Daily Summary Card
-// ─────────────────────────────────────────────
+// ── Daily Summary Card ─────────────────────────────────────────────────────
 
 export function buildDailySummaryCard(records: LeaveRecord[]): CardActivity {
   const today = new Date().toLocaleDateString("en-IN", {
@@ -359,14 +296,14 @@ export function buildDailySummaryCard(records: LeaveRecord[]): CardActivity {
   const leave = records.filter((r) => r.type === "LEAVE");
   const sick  = records.filter((r) => r.type === "SICK");
   const toList = (arr: LeaveRecord[]) =>
-    arr.length > 0 ? arr.map((r) => `• ${r.employee}`).join("\n") : "None";
+    arr.length > 0 ? arr.map((r) => `- ${r.employee}`).join("\n") : "None";
 
   return wrap({
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
     type: "AdaptiveCard",
     version: "1.4",
     body: [
-      { type: "TextBlock", text: "📊 Daily Workforce Summary", weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "TextBlock", text: "Daily Workforce Summary", weight: "Bolder", size: "Large", color: "Accent" },
       { type: "TextBlock", text: today, size: "Small", isSubtle: true },
       {
         type: "ColumnSet",
@@ -374,21 +311,21 @@ export function buildDailySummaryCard(records: LeaveRecord[]): CardActivity {
           {
             type: "Column", width: "stretch",
             items: [
-              { type: "TextBlock", text: `🏠 WFH (${wfh.length})`, weight: "Bolder" },
+              { type: "TextBlock", text: `WFH (${wfh.length})`, weight: "Bolder" },
               { type: "TextBlock", text: toList(wfh), wrap: true, size: "Small" },
             ],
           },
           {
             type: "Column", width: "stretch",
             items: [
-              { type: "TextBlock", text: `🌴 Leave (${leave.length})`, weight: "Bolder" },
+              { type: "TextBlock", text: `On Leave (${leave.length})`, weight: "Bolder" },
               { type: "TextBlock", text: toList(leave), wrap: true, size: "Small" },
             ],
           },
           {
             type: "Column", width: "stretch",
             items: [
-              { type: "TextBlock", text: `🤒 Sick (${sick.length})`, weight: "Bolder" },
+              { type: "TextBlock", text: `Sick (${sick.length})`, weight: "Bolder" },
               { type: "TextBlock", text: toList(sick), wrap: true, size: "Small" },
             ],
           },
@@ -396,7 +333,7 @@ export function buildDailySummaryCard(records: LeaveRecord[]): CardActivity {
       },
       {
         type: "TextBlock",
-        text: `Total: ${records.length} absent today`,
+        text: `Total absent today: ${records.length}`,
         size: "Small",
         isSubtle: true,
         color: records.length > 0 ? "Warning" : "Good",
@@ -405,9 +342,7 @@ export function buildDailySummaryCard(records: LeaveRecord[]): CardActivity {
   });
 }
 
-// ─────────────────────────────────────────────
-// Help Card
-// ─────────────────────────────────────────────
+// ── Help Card ──────────────────────────────────────────────────────────────
 
 export function buildHelpCard(): CardActivity {
   return wrap({
@@ -415,7 +350,7 @@ export function buildHelpCard(): CardActivity {
     type: "AdaptiveCard",
     version: "1.4",
     body: [
-      { type: "TextBlock", text: "🤖 LeaveAgent — Commands", weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "TextBlock", text: "LeaveAgent - Commands", weight: "Bolder", size: "Large", color: "Accent" },
       {
         type: "FactSet",
         facts: [
@@ -431,9 +366,7 @@ export function buildHelpCard(): CardActivity {
   });
 }
 
-// ─────────────────────────────────────────────
-// My Requests Card
-// ─────────────────────────────────────────────
+// ── My Requests Card ───────────────────────────────────────────────────────
 
 export function buildMyRequestsCard(userName: string, records: LeaveRecord[]): CardActivity {
   if (records.length === 0) {
@@ -441,9 +374,7 @@ export function buildMyRequestsCard(userName: string, records: LeaveRecord[]): C
       $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
       type: "AdaptiveCard",
       version: "1.4",
-      body: [
-        { type: "TextBlock", text: "📋 No leave requests found.", wrap: true },
-      ],
+      body: [{ type: "TextBlock", text: "No leave requests found.", wrap: true }],
     });
   }
 
@@ -452,21 +383,19 @@ export function buildMyRequestsCard(userName: string, records: LeaveRecord[]): C
     type: "AdaptiveCard",
     version: "1.4",
     body: [
-      { type: "TextBlock", text: `📋 ${userName}'s Recent Requests`, weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "TextBlock", text: `${userName} - Recent Requests`, weight: "Bolder", size: "Large", color: "Accent" },
       {
         type: "FactSet",
         facts: records.map((r) => ({
           title: formatDisplayDate(r.date),
-          value: `${getTypeLabel(r.type)} — ${r.status}`,
+          value: `${getTypeLabel(r.type)} - ${r.status}`,
         })),
       },
     ],
   });
 }
 
-// ─────────────────────────────────────────────
-// Already Processed Card  (returned from card.action as raw content)
-// ─────────────────────────────────────────────
+// ── Already Processed Card ─────────────────────────────────────────────────
 
 export function buildAlreadyProcessedCardContent(): IAdaptiveCard {
   return {
@@ -476,7 +405,7 @@ export function buildAlreadyProcessedCardContent(): IAdaptiveCard {
     body: [
       {
         type: "TextBlock",
-        text: "⚠️ This request has already been processed.",
+        text: "This request has already been processed.",
         color: "Warning",
         wrap: true,
       },

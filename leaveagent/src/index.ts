@@ -46,26 +46,23 @@ const app = new App({
 // ─────────────────────────────────────────────
 
 app.on("message", async ({ activity, send, api }) => {
-  // Strip HTML mention tags Teams adds (e.g. <at>BotName</at>)
   const userMessage = (activity.text ?? "").replace(/<[^>]+>/g, "").trim();
   const userId      = activity.from.id;
   const userName    = activity.from.name ?? "Employee";
 
   console.log(`[LeaveAgent] "${userMessage}" from ${userName} (${userId})`);
 
-  // Save conversation ref — needed for proactive DMs later
   saveConversationRef(userId, {
     userId,
     userName,
     conversationId: activity.conversation.id,
     serviceUrl:     activity.serviceUrl,
     tenantId:       activity.conversation.tenantId,
-    botId: activity.recipient?.id ?? "bot",
+    botId:          activity.recipient?.id ?? "bot",
   });
 
   const cmd = userMessage.toLowerCase();
 
-  // ── Special commands ──────────────────────────────────────────────
   if (cmd === "help") {
     await send(buildHelpCard());
     return;
@@ -84,9 +81,7 @@ app.on("message", async ({ activity, send, api }) => {
     return;
   }
 
-  // ── AI intent parsing ─────────────────────────────────────────────
-  // Send typing as a plain string activity the SDK accepts
-  await send("⏳ Processing your request...");
+  await send("Processing your request...");
 
   const intent = await parseLeaveIntent(userMessage);
   console.log(`[LeaveAgent] Intent:`, JSON.stringify(intent));
@@ -94,33 +89,30 @@ app.on("message", async ({ activity, send, api }) => {
   if (intent.needs_clarification || intent.intent === "UNKNOWN") {
     await send(
       intent.clarification_question ??
-        "🤔 Could you rephrase? Try: 'WFH tomorrow', 'Sick today', or 'Leave on Friday'."
+      "Could you rephrase? Try: 'WFH tomorrow', 'Sick today', or 'Leave on Friday'."
     );
     return;
   }
 
-  // ── Duplicate check ───────────────────────────────────────────────
   if (isDuplicateRequest(userName, intent.date)) {
     await send(
-      `⚠️ You already have a request for **${formatDisplayDate(intent.date)}**.\nType \`my requests\` to view it.`
+      `You already have a request for ${formatDisplayDate(intent.date)}. Type 'my requests' to view it.`
     );
     return;
   }
 
-  // ── Employee lookup ───────────────────────────────────────────────
   const employee = findEmployee(userName);
   if (!employee) {
     await send(
-      `❌ I couldn't find **${userName}** in the employee directory.\nPlease ask HR to add you to the Employees sheet.`
+      `I couldn't find ${userName} in the employee directory. Please ask HR to add you.`
     );
     return;
   }
 
-  const displayDate  = formatDisplayDate(intent.date);
+  const displayDate   = formatDisplayDate(intent.date);
   const durationLabel = intent.duration === "half_day" ? "Half Day" : "Full Day";
 
-  // ── Write to Excel ────────────────────────────────────────────────
-  const record: LeaveRecord = {
+  addLeaveRequest({
     employee:     userName,
     email:        employee.email,
     type:         intent.intent,
@@ -129,46 +121,62 @@ app.on("message", async ({ activity, send, api }) => {
     duration:     intent.duration,
     status:       "Pending",
     requested_at: new Date().toISOString(),
-  };
-  addLeaveRequest(record);
+  });
 
-  // ── Confirm to employee ───────────────────────────────────────────
   await send(buildConfirmationCard(userName, intent.intent, displayDate, durationLabel));
 
-  // ── Send approval card to manager (proactive) ─────────────────────
-  const managerRef = getConversationRef(employee.manager_teams_id ?? "");
-  if (managerRef?.conversationId) {
-    try {
-      await api.conversations.activities(managerRef.conversationId).create({
-        type: "message",
-        attachments: [
-          {
-            contentType: "application/vnd.microsoft.card.adaptive",
-            content: buildApprovalCardContent({
-              employeeName:  userName,
-              employeeEmail: employee.email,
-              requestType:   intent.intent,
-              date:          intent.date,
-              displayDate,
-              duration:      durationLabel,
-            }),
-          },
-        ],
-      } as any);
-      console.log(`[LeaveAgent] ✅ Approval card sent to manager ${employee.manager}`);
-    } catch (err) {
-      console.warn(`[LeaveAgent] ⚠️ Proactive card to manager failed:`, err);
-      await send(`📨 Your manager **${employee.manager}** has been notified.`);
-    }
+  // Build approval card payload once — used in both inline and proactive paths
+  const approvalCardPayload = buildApprovalCardContent({
+    employeeName:  userName,
+    employeeEmail: employee.email,
+    requestType:   intent.intent,
+    date:          intent.date,
+    displayDate,
+    duration:      durationLabel,
+  });
+
+  const managerRef        = getConversationRef(employee.manager_teams_id ?? "");
+  const managerIsSameUser = employee.manager_teams_id === userId; // devtools: both are "devtools"
+  const managerHasRef     = !!(managerRef?.conversationId);
+
+  if (managerIsSameUser || !managerHasRef) {
+    // DEVTOOLS / DEMO: show approval card inline so Approve/Reject buttons are clickable
+    await send("---- Manager Approval Request ----");
+    await send({
+      type: "message",
+      attachments: [{
+        contentType: "application/vnd.microsoft.card.adaptive",
+        content: approvalCardPayload,
+      }],
+    } as any);
   } else {
-    console.warn(`[LeaveAgent] ⚠️ No conversation ref for manager ${employee.manager} — they must message the bot first.`);
-    await send(`📨 Your manager **${employee.manager}** has been notified.`);
+    // PRODUCTION: send approval card proactively to manager's own conversation
+    try {
+      await api.conversations.activities(managerRef!.conversationId).create({
+        type: "message",
+        attachments: [{
+          contentType: "application/vnd.microsoft.card.adaptive",
+          content: approvalCardPayload,
+        }],
+      } as any);
+      console.log(`[LeaveAgent] Approval card sent to manager ${employee.manager}`);
+    } catch (err) {
+      // Fallback: show inline if proactive send fails
+      console.warn(`[LeaveAgent] Proactive failed, showing inline:`, err);
+      await send("---- Manager Approval Request ----");
+      await send({
+        type: "message",
+        attachments: [{
+          contentType: "application/vnd.microsoft.card.adaptive",
+          content: approvalCardPayload,
+        }],
+      } as any);
+    }
   }
-});
+}); // <-- closes app.on("message")
 
 // ─────────────────────────────────────────────
 // Adaptive Card Actions — Manager clicks Approve / Reject
-// card.action handler must return AdaptiveCardInvokeResponse
 // ─────────────────────────────────────────────
 
 app.on("card.action", async ({ activity, send, api }) => {
@@ -177,7 +185,6 @@ app.on("card.action", async ({ activity, send, api }) => {
 
   console.log(`[LeaveAgent] card.action from ${managerName}:`, data);
 
-  // Validate incoming data
   if (!data?.action || !data?.employeeName || !data?.date) {
     return {
       statusCode: 200,
@@ -192,7 +199,6 @@ app.on("card.action", async ({ activity, send, api }) => {
 
   const updated = updateLeaveStatus(employeeName, date, status, managerName);
 
-  // Already processed — return a replaced card
   if (!updated) {
     return {
       statusCode: 200,
@@ -202,30 +208,41 @@ app.on("card.action", async ({ activity, send, api }) => {
   }
 
   const employee = findEmployee(employeeName);
-  const cardData = { employeeName, requestType, date, displayDate };
+  const cardData  = { employeeName, requestType, date, displayDate };
 
-  // ── DM employee with decision ─────────────────────────────────────
-  const employeeRef = getConversationRef(employee?.teams_id ?? "");
-  if (employeeRef?.conversationId) {
+  // Notify employee — inline in devtools, proactive DM in production
+  const employeeRef        = getConversationRef(employee?.teams_id ?? "");
+  const employeeIsSameConv = !employeeRef?.conversationId ||
+    employeeRef.conversationId === activity.conversation.id;
+
+  if (employeeIsSameConv) {
+    // DEVTOOLS: show employee status card inline
+    await send(`---- Employee Notification: Request ${status} ----`);
+    await send({
+      type: "message",
+      attachments: [{
+        contentType: "application/vnd.microsoft.card.adaptive",
+        content: buildStatusCardContent(requestType, displayDate, status, managerName),
+      }],
+    } as any);
+  } else {
+    // PRODUCTION: DM employee proactively
     try {
-      await api.conversations.activities(employeeRef.conversationId).create({
+      await api.conversations.activities(employeeRef!.conversationId).create({
         type: "message",
-        attachments: [
-          {
-            contentType: "application/vnd.microsoft.card.adaptive",
-            content: buildStatusCardContent(requestType, displayDate, status, managerName),
-          },
-        ],
+        attachments: [{
+          contentType: "application/vnd.microsoft.card.adaptive",
+          content: buildStatusCardContent(requestType, displayDate, status, managerName),
+        }],
       } as any);
-      console.log(`[LeaveAgent] ✅ DMed employee ${employeeName}`);
+      console.log(`[LeaveAgent] DMed employee ${employeeName}`);
     } catch (err) {
-      console.warn(`[LeaveAgent] ⚠️ Could not DM employee:`, err);
+      console.warn(`[LeaveAgent] Could not DM employee:`, err);
     }
   }
 
-  // ── Post workforce announcement if approved ───────────────────────
   if (status === "Approved" && employee) {
-    const leaveRecord: LeaveRecord = {
+    await send(buildAnnouncementCard({
       employee:     employeeName,
       email:        employee.email,
       type:         requestType,
@@ -234,11 +251,9 @@ app.on("card.action", async ({ activity, send, api }) => {
       status:       "Approved",
       approved_by:  managerName,
       requested_at: new Date().toISOString(),
-    };
-    await send(buildAnnouncementCard(leaveRecord));
+    }));
   }
 
-  // ── Return updated card — replaces the approval card in Teams ─────
   return {
     statusCode: 200,
     type: "application/vnd.microsoft.card.adaptive",
@@ -246,7 +261,7 @@ app.on("card.action", async ({ activity, send, api }) => {
       ? buildApprovedCardContent(cardData, managerName)
       : buildRejectedCardContent(cardData, managerName),
   };
-});
+}); // <-- closes app.on("card.action")
 
 // ─────────────────────────────────────────────
 // Bot installed — welcome message
@@ -254,9 +269,9 @@ app.on("card.action", async ({ activity, send, api }) => {
 
 app.on("install.add", async ({ send }) => {
   await send(
-    "👋 Hi! I'm **LeaveAgent** — your AI-powered leave assistant.\n\n" +
-    "Just tell me:\n• `WFH tomorrow`\n• `Sick today`\n• `Leave on Friday`\n\n" +
-    "Type `help` for all commands. ✅"
+    "Hi! I'm LeaveAgent, your AI-powered leave assistant.\n\n" +
+    "Try: 'WFH tomorrow', 'Sick today', 'Leave on Friday'\n\n" +
+    "Type 'help' for all commands."
   );
 });
 
@@ -266,6 +281,6 @@ app.on("install.add", async ({ send }) => {
 
 (async () => {
   await app.start(+(process.env.PORT ?? 3978));
-  console.log(`\n🤖 LeaveAgent running on port ${process.env.PORT ?? 3978}`);
-  console.log(`📡 Endpoint: http://localhost:${process.env.PORT ?? 3978}/api/messages\n`);
+  console.log(`\nLeaveAgent running on port ${process.env.PORT ?? 3978}`);
+  console.log(`Endpoint: http://localhost:${process.env.PORT ?? 3978}/api/messages\n`);
 })();
