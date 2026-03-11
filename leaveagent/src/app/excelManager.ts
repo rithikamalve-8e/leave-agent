@@ -1,45 +1,52 @@
-import * as XLSX from "xlsx";
-import * as fs from "fs";
-import * as path from "path";
+/**
+ * excelManager.ts
+ * Handles all Excel read/write operations and in-memory conversation refs.
+ */
 
-// ─────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────
+import * as XLSX from "xlsx";
+import * as path from "path";
+import * as fs   from "fs";
+
+const DATA_DIR      = path.join(process.cwd(), "data");
+const EMPLOYEES_PATH = path.join(DATA_DIR, "Employees.xlsx");
+const LEAVE_PATH     = path.join(DATA_DIR, "LeaveRequests.xlsx");
+
+// ── Types ──────────────────────────────────────────────────────────────────
 
 export interface Employee {
-  name: string;
-  email: string;
-  manager: string;
-  manager_email: string;
-  teams_id?: string;
-  manager_teams_id?: string;
+  name:              string;
+  email:             string;
+  manager:           string;
+  manager_email:     string;
+  manager_teams_id:  string;
+  teamlead:          string;       // ADDED: per-employee team lead name
+  teamlead_email:    string;       // ADDED: per-employee team lead email
+  teams_id:          string;
 }
 
 export interface LeaveRecord {
-  employee: string;
-  email: string;
-  type: string;
-  date: string;
-  end_date?: string;
-  duration: string;
-  status: "Pending" | "Approved" | "Rejected";
+  employee:     string;
+  email:        string;
+  type:         string;
+  date:         string;
+  end_date?:    string;
+  duration:     string;
+  status:       string;
   approved_by?: string;
   requested_at: string;
-  updated_at?: string;
+  updated_at?:  string;
 }
 
 export interface ConversationRef {
-  userId: string;
-  userName: string;
+  userId:         string;
+  userName:       string;
   conversationId: string;
-  serviceUrl: string;
-  tenantId?: string;
-  botId: string;
+  serviceUrl:     string;
+  tenantId?:      string;
+  botId:          string;
 }
 
-// ─────────────────────────────────────────────
-// In-memory conversation reference store
-// ─────────────────────────────────────────────
+// ── In-memory conversation refs ────────────────────────────────────────────
 
 const conversationRefs = new Map<string, ConversationRef>();
 
@@ -52,119 +59,109 @@ export function getConversationRef(userId: string): ConversationRef | undefined 
   return conversationRefs.get(userId);
 }
 
-// ─────────────────────────────────────────────
-// File paths (from env or defaults)
-// ─────────────────────────────────────────────
+// ── Employees ──────────────────────────────────────────────────────────────
 
-const EMPLOYEES_PATH =
-  process.env.EMPLOYEES_FILE_PATH ?? path.join(process.cwd(), "data", "Employees.xlsx");
-
-const LEAVE_PATH =
-  process.env.LEAVE_REQUESTS_FILE_PATH ??
-  path.join(process.cwd(), "data", "LeaveRequests.xlsx");
-
-const EMPLOYEE_HEADERS = [
-  "name", "email", "manager", "manager_email", "teams_id", "manager_teams_id",
-];
-
-const LEAVE_HEADERS = [
-  "employee", "email", "type", "date", "end_date",
-  "duration", "status", "approved_by", "requested_at", "updated_at",
-];
-
-// ─────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────
-
-function ensureFile(filePath: string, headers: string[]): void {
-  if (!fs.existsSync(filePath)) {
-    const dir = path.dirname(filePath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet([headers]);
-    XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
-    XLSX.writeFile(wb, filePath);
-    console.log(`[Excel] Created: ${filePath}`);
+export function getAllEmployees(): Employee[] {
+  try {
+    const wb   = XLSX.readFile(EMPLOYEES_PATH);
+    const ws   = wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_json<Employee>(ws);
+  } catch {
+    return [];
   }
 }
 
-function readSheet<T>(filePath: string, headers: string[]): T[] {
-  ensureFile(filePath, headers);
-  const wb = XLSX.readFile(filePath);
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  return XLSX.utils.sheet_to_json<T>(ws, { defval: "" });
-}
-
-function writeSheet<T>(filePath: string, data: T[], headers: string[]): void {
-  ensureFile(filePath, headers);
-  const wb = XLSX.readFile(filePath);
-  wb.Sheets[wb.SheetNames[0]] = XLSX.utils.json_to_sheet(data, { header: headers });
-  XLSX.writeFile(wb, filePath);
-}
-
-// ─────────────────────────────────────────────
-// Employees
-// ─────────────────────────────────────────────
-
-export function getAllEmployees(): Employee[] {
-  return readSheet<Employee>(EMPLOYEES_PATH, EMPLOYEE_HEADERS);
-}
-
 export function findEmployee(nameOrEmail: string): Employee | undefined {
-  const q = nameOrEmail.toLowerCase();
-  return getAllEmployees().find(
-    (e) => e.name?.toLowerCase() === q || e.email?.toLowerCase() === q
+  const all = getAllEmployees();
+  const key = nameOrEmail.toLowerCase();
+  return all.find(
+    (e) =>
+      e.name?.toLowerCase()  === key ||
+      e.email?.toLowerCase() === key
   );
 }
 
-// ─────────────────────────────────────────────
-// Leave Requests
-// ─────────────────────────────────────────────
+// ── Leave Requests ─────────────────────────────────────────────────────────
+
+function ensureLeaveFile(): void {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(LEAVE_PATH)) {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet([], {
+        header: ["employee","email","type","date","end_date","duration","status","approved_by","requested_at","updated_at"],
+      }),
+      "LeaveRequests"
+    );
+    XLSX.writeFile(wb, LEAVE_PATH);
+    console.log(`[Excel] Created: ${LEAVE_PATH}`);
+  }
+}
 
 export function getAllLeaveRequests(): LeaveRecord[] {
-  return readSheet<LeaveRecord>(LEAVE_PATH, LEAVE_HEADERS);
+  ensureLeaveFile();
+  const wb = XLSX.readFile(LEAVE_PATH);
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json<LeaveRecord>(ws);
 }
 
 export function addLeaveRequest(record: LeaveRecord): void {
-  const all = getAllLeaveRequests();
-  all.push(record);
-  writeSheet(LEAVE_PATH, all, LEAVE_HEADERS);
-  console.log(`[Excel] ✅ Added: ${record.employee} - ${record.type} on ${record.date}`);
+  ensureLeaveFile();
+  const wb      = XLSX.readFile(LEAVE_PATH);
+  const ws      = wb.Sheets[wb.SheetNames[0]];
+  const records = XLSX.utils.sheet_to_json<LeaveRecord>(ws);
+  records.push(record);
+  wb.Sheets[wb.SheetNames[0]] = XLSX.utils.json_to_sheet(records, {
+    header: ["employee","email","type","date","end_date","duration","status","approved_by","requested_at","updated_at"],
+  });
+  XLSX.writeFile(wb, LEAVE_PATH);
+  console.log(`[Excel] Added: ${record.employee} - ${record.type} on ${record.date}`);
 }
 
 export function updateLeaveStatus(
   employee: string,
   date: string,
-  status: "Approved" | "Rejected",
+  status: string,
   approvedBy: string
 ): boolean {
-  const all = getAllLeaveRequests();
-  const idx = all.findIndex(
+  ensureLeaveFile();
+  const wb      = XLSX.readFile(LEAVE_PATH);
+  const ws      = wb.Sheets[wb.SheetNames[0]];
+  const records = XLSX.utils.sheet_to_json<LeaveRecord>(ws);
+
+  const idx = records.findIndex(
     (r) =>
       r.employee?.toLowerCase() === employee.toLowerCase() &&
       r.date === date &&
       r.status === "Pending"
   );
+
   if (idx === -1) return false;
 
-  all[idx].status = status;
-  all[idx].approved_by = approvedBy;
-  all[idx].updated_at = new Date().toISOString();
-  writeSheet(LEAVE_PATH, all, LEAVE_HEADERS);
-  console.log(`[Excel] ✅ Updated ${employee} → ${status}`);
+  records[idx].status      = status;
+  records[idx].approved_by = approvedBy;
+  records[idx].updated_at  = new Date().toISOString();
+
+  wb.Sheets[wb.SheetNames[0]] = XLSX.utils.json_to_sheet(records, {
+    header: ["employee","email","type","date","end_date","duration","status","approved_by","requested_at","updated_at"],
+  });
+  XLSX.writeFile(wb, LEAVE_PATH);
   return true;
 }
 
 export function isDuplicateRequest(employee: string, date: string): boolean {
-  return getAllLeaveRequests().some(
+  const records = getAllLeaveRequests();
+  return records.some(
     (r) =>
       r.employee?.toLowerCase() === employee.toLowerCase() &&
       r.date === date &&
-      r.status !== "Rejected"
+      r.status === "Pending"
   );
 }
 
 export function getTodaysAbsences(): LeaveRecord[] {
-  const today = new Date().toISOString().split("T")[0];
-  return getAllLeaveRequests().filter((r) => r.date === today && r.status === "Approved");
+  const today   = new Date().toISOString().split("T")[0];
+  const records = getAllLeaveRequests();
+  return records.filter((r) => r.date === today && r.status === "Approved");
 }

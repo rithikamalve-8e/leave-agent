@@ -13,14 +13,15 @@
         "color": "color.png",
         "outline": "outline.png"
     },
-    "name": {
-        "short": "leaveagent${{APP_NAME_SUFFIX}}",
-        "full": "full name for leaveagent"
-    },
+     "name": {
+        "short": "LeaveAgent",
+        "full": "LeaveAgent - Leave & WFH Assistant"
+        },
     "description": {
-        "short": "short description for leaveagent",
-        "full": "full description for leaveagent"
-    },
+        "short": "Manage leave and WFH requests",
+        "full": "AI-powered leave management bot for Microsoft Teams"
+        },
+   
     "accentColor": "#FFFFFF",
     "bots": [
         {

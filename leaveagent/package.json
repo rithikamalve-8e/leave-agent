@@ -27,23 +27,25 @@
     },
     "dependencies": {
         "@azure/identity": "^4.11.1",
-        "@microsoft/teams.apps": "^2.0.0",
         "@microsoft/teams.ai": "^2.0.0",
+        "@microsoft/teams.apps": "^2.0.0",
         "@microsoft/teams.cards": "^2.0.0",
-        "@microsoft/teams.openai": "^2.0.0",
         "@microsoft/teams.common": "^2.0.0",
-        "@microsoft/teams.dev":"^2.0.0",
+        "@microsoft/teams.dev": "^2.0.0",
+        "@microsoft/teams.openai": "^2.0.0",
+        "@types/nodemailer": "^7.0.11",
+        "dotenv": "^16.4.5",
         "groq-sdk": "^0.8.0",
-        "xlsx": "^0.18.5",
-        "dotenv": "^16.4.5"
+        "nodemailer": "^8.0.2",
+        "xlsx": "^0.18.5"
     },
     "devDependencies": {
         "@types/node": "^20.0.0",
         "env-cmd": "^10.1.0",
-        "ts-node": "^10.4.0",
-        "typescript": "~5.8.3",
         "nodemon": "^3.1.7",
-        "shx": "^0.3.3"
+        "shx": "^0.3.3",
+        "ts-node": "^10.4.0",
+        "typescript": "~5.8.3"
     },
     "keywords": [],
     "type": "commonjs"
