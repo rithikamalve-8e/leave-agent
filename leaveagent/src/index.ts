@@ -14,6 +14,8 @@ import {
   LeaveRecord,
   saveConversationRef,
   getConversationRef,
+  countWorkingDays,
+  checkLeaveBalance,
 } from "./app/excelManager";
 import {
   buildApprovalCardContent,
@@ -33,9 +35,7 @@ import {
   sendDecisionEmail,
 } from "./app/emailService";
 
-const app = new App({
-  plugins: [new DevtoolsPlugin()],
-});
+const app = new App({ plugins: [new DevtoolsPlugin()] });
 
 // ── Incoming Messages ──────────────────────────────────────────────────────
 
@@ -73,7 +73,7 @@ app.on("message", async ({ activity, send, api }) => {
   console.log(`[LeaveAgent] Intent:`, JSON.stringify(intent));
 
   if (intent.needs_clarification || intent.intent === "UNKNOWN") {
-    await send(intent.clarification_question ?? "Could you rephrase? Try: 'WFH tomorrow', 'Sick today', or 'Leave on Friday'.");
+    await send(intent.clarification_question ?? "Could you rephrase? Try: 'WFH tomorrow', 'Sick today', or 'Leave from 20th to 25th'.");
     return;
   }
 
@@ -89,15 +89,33 @@ app.on("message", async ({ activity, send, api }) => {
   }
 
   const displayDate   = formatDisplayDate(intent.date);
-  const durationLabel = intent.duration === "half_day" ? "Half Day" : "Full Day";
+  const displayEndDate = intent.end_date ? formatDisplayDate(intent.end_date) : null;
+  const durationLabel = intent.duration === "half_day" ? "Half Day" : intent.duration === "multi_day" ? "Multiple Days" : "Full Day";
   const isTeamLead    = employee.role === "teamlead";
 
-  // Who approves this request?
-  // - Employee  → Team Lead approves
-  // - Team Lead → Manager approves
-  const approverName     = isTeamLead ? employee.manager      : employee.teamlead;
-  const approverEmail    = isTeamLead ? employee.manager_email : employee.teamlead_email;
-  const approverTeamsId  = isTeamLead ? employee.manager_teams_id : employee.teamlead_teams_id;
+  // Count working days in the request
+  const daysCount = intent.duration === "half_day"
+    ? 0.5
+    : countWorkingDays(intent.date, intent.end_date);
+
+  // Check leave balance (only matters for LEAVE type)
+  const balanceResult = checkLeaveBalance(employee, daysCount, intent.intent);
+
+  // If LOP situation, warn the employee before proceeding
+  if (balanceResult.hasLop) {
+    await send(
+      `Your current leave balance is **${balanceResult.balance} day(s)**.\n\n` +
+      `You requested **${balanceResult.requested} day(s)**.\n\n` +
+      `**${balanceResult.granted} day(s)** will be approved from your balance.\n` +
+      `**${balanceResult.lop} day(s)** will be **Loss of Pay (LOP)** — please contact HR for details.\n\n` +
+      `Your request has been submitted and will go to your approver.`
+    );
+  }
+
+  // Approver logic based on role
+  const approverName    = isTeamLead ? employee.manager      : employee.teamlead;
+  const approverEmail   = isTeamLead ? employee.manager_email : employee.teamlead_email;
+  const approverTeamsId = isTeamLead ? employee.manager_teams_id : employee.teamlead_teams_id;
 
   addLeaveRequest({
     employee:     userName,
@@ -106,13 +124,24 @@ app.on("message", async ({ activity, send, api }) => {
     date:         intent.date,
     end_date:     intent.end_date ?? "",
     duration:     intent.duration,
+    days_count:   daysCount,
+    reason:       intent.reason ?? "",
     status:       "Pending",
     requested_at: new Date().toISOString(),
   });
 
-  await send(buildConfirmationCard(userName, intent.intent, displayDate, durationLabel));
+  await send(buildConfirmationCard(
+    userName,
+    intent.intent,
+    displayDate,
+    durationLabel,
+    displayEndDate,
+    daysCount,
+    intent.reason,
+    balanceResult
+  ));
 
-  // EMAIL: notify approver (and relevant CC list based on role)
+  // Email approver
   await sendRequestNotificationEmail({
     employeeName:  userName,
     employeeEmail: employee.email,
@@ -127,7 +156,7 @@ app.on("message", async ({ activity, send, api }) => {
     status:        "Pending",
   });
 
-  // Teams approval card — send to approver
+  // Send approval card to approver
   const approvalCardPayload = buildApprovalCardContent({
     employeeName:  userName,
     employeeEmail: employee.email,
@@ -135,6 +164,10 @@ app.on("message", async ({ activity, send, api }) => {
     date:          intent.date,
     displayDate,
     duration:      durationLabel,
+    endDate:       displayEndDate,
+    daysCount,
+    reason:        intent.reason,
+    balanceResult,
   });
 
   const approverRef       = getConversationRef(approverTeamsId ?? "");
@@ -142,24 +175,16 @@ app.on("message", async ({ activity, send, api }) => {
   const approverHasRef    = !!(approverRef?.conversationId);
 
   if (approverIsSameUser || !approverHasRef) {
-    // Devtools / demo: show inline
     await send(`---- Approval Request for ${approverName} ----`);
     await send({
       type: "message",
-      attachments: [{
-        contentType: "application/vnd.microsoft.card.adaptive",
-        content: approvalCardPayload,
-      }],
+      attachments: [{ contentType: "application/vnd.microsoft.card.adaptive", content: approvalCardPayload }],
     } as any);
   } else {
-    // Production: proactive DM to approver
     try {
       await api.conversations.activities(approverRef!.conversationId).create({
         type: "message",
-        attachments: [{
-          contentType: "application/vnd.microsoft.card.adaptive",
-          content: approvalCardPayload,
-        }],
+        attachments: [{ contentType: "application/vnd.microsoft.card.adaptive", content: approvalCardPayload }],
       } as any);
       console.log(`[LeaveAgent] Approval card sent to ${approverName}`);
     } catch (err) {
@@ -167,16 +192,13 @@ app.on("message", async ({ activity, send, api }) => {
       await send(`---- Approval Request for ${approverName} ----`);
       await send({
         type: "message",
-        attachments: [{
-          contentType: "application/vnd.microsoft.card.adaptive",
-          content: approvalCardPayload,
-        }],
+        attachments: [{ contentType: "application/vnd.microsoft.card.adaptive", content: approvalCardPayload }],
       } as any);
     }
   }
 });
 
-// ── Card Actions: Approver clicks Approve / Reject ─────────────────────────
+// ── Card Actions ───────────────────────────────────────────────────────────
 
 app.on("card.action", async ({ activity, send, api }) => {
   const data         = (activity.value as any)?.action?.data;
@@ -185,11 +207,7 @@ app.on("card.action", async ({ activity, send, api }) => {
   console.log(`[LeaveAgent] card.action from ${approverName}:`, data);
 
   if (!data?.action || !data?.employeeName || !data?.date) {
-    return {
-      statusCode: 200,
-      type: "application/vnd.microsoft.card.adaptive",
-      value: buildAlreadyProcessedCardContent() as any,
-    } as any;
+    return { statusCode: 200, type: "application/vnd.microsoft.card.adaptive", value: buildAlreadyProcessedCardContent() as any } as any;
   }
 
   const { action, employeeName, date, requestType = "WFH" } = data;
@@ -198,18 +216,21 @@ app.on("card.action", async ({ activity, send, api }) => {
 
   const updated = updateLeaveStatus(employeeName, date, status, approverName);
   if (!updated) {
-    return {
-      statusCode: 200,
-      type: "application/vnd.microsoft.card.adaptive",
-      value: buildAlreadyProcessedCardContent() as any,
-    } as any;
+    return { statusCode: 200, type: "application/vnd.microsoft.card.adaptive", value: buildAlreadyProcessedCardContent() as any } as any;
   }
 
-  const employee = findEmployee(employeeName);
-  const cardData  = { employeeName, requestType, date, displayDate };
-  const isTeamLead = employee?.role === "teamlead";
+  const employee   = findEmployee(employeeName);
+  const cardData   = { employeeName, requestType, date, displayDate };
 
-  // EMAIL: notify employee of decision (CC list based on role)
+  // Pull actual duration and days_count from the saved record instead of hardcoding
+  const allRecords   = getAllLeaveRequests();
+  const leaveRecord  = allRecords.find(
+    (r) => r.employee?.toLowerCase() === employeeName.toLowerCase() && r.date === date
+  );
+  const actualDuration  = leaveRecord?.duration  ?? "full_day";
+  const actualDaysCount = leaveRecord?.days_count ?? 1;
+  const durationLabel   = actualDuration === "half_day" ? "Half Day" : actualDuration === "multi_day" ? "Multiple Days" : "Full Day";
+
   if (employee) {
     await sendDecisionEmail({
       employeeName,
@@ -221,13 +242,12 @@ app.on("card.action", async ({ activity, send, api }) => {
       teamleadEmail: employee.teamlead_email,
       requestType,
       displayDate,
-      duration:      "Full Day",
+      duration:      durationLabel,  // from actual record
       status,
       decidedBy:     approverName,
     });
   }
 
-  // Teams: notify employee inline (devtools) or proactive DM (production)
   const employeeRef        = getConversationRef(employee?.teams_id ?? "");
   const employeeIsSameConv = !employeeRef?.conversationId ||
     employeeRef.conversationId === activity.conversation.id;
@@ -236,21 +256,14 @@ app.on("card.action", async ({ activity, send, api }) => {
     await send(`---- Employee Notification: Request ${status} ----`);
     await send({
       type: "message",
-      attachments: [{
-        contentType: "application/vnd.microsoft.card.adaptive",
-        content: buildStatusCardContent(requestType, displayDate, status, approverName),
-      }],
+      attachments: [{ contentType: "application/vnd.microsoft.card.adaptive", content: buildStatusCardContent(requestType, displayDate, status, approverName) }],
     } as any);
   } else {
     try {
       await api.conversations.activities(employeeRef!.conversationId).create({
         type: "message",
-        attachments: [{
-          contentType: "application/vnd.microsoft.card.adaptive",
-          content: buildStatusCardContent(requestType, displayDate, status, approverName),
-        }],
+        attachments: [{ contentType: "application/vnd.microsoft.card.adaptive", content: buildStatusCardContent(requestType, displayDate, status, approverName) }],
       } as any);
-      console.log(`[LeaveAgent] DMed employee ${employeeName}`);
     } catch (err) {
       console.warn(`[LeaveAgent] Could not DM employee:`, err);
     }
@@ -262,7 +275,9 @@ app.on("card.action", async ({ activity, send, api }) => {
       email:        employee.email,
       type:         requestType,
       date,
-      duration:     "full_day",
+      end_date:     leaveRecord?.end_date,
+      duration:     actualDuration,    // from actual record
+      days_count:   actualDaysCount,   // from actual record
       status:       "Approved",
       approved_by:  approverName,
       requested_at: new Date().toISOString(),
@@ -278,20 +293,11 @@ app.on("card.action", async ({ activity, send, api }) => {
   } as any;
 });
 
-// ── Welcome ────────────────────────────────────────────────────────────────
-
 app.on("install.add", async ({ send }) => {
-  await send(
-    "Hi! I'm LeaveAgent, your AI-powered leave assistant.\n\n" +
-    "Try: 'WFH tomorrow', 'Sick today', 'Leave on Friday'\n\n" +
-    "Type 'help' for all commands."
-  );
+  await send("Hi! I'm LeaveAgent, your AI-powered leave assistant.\n\nTry: 'WFH tomorrow', 'Sick today', 'Leave from 20th to 25th'\n\nType 'help' for all commands.");
 });
-
-// ── Start ──────────────────────────────────────────────────────────────────
 
 (async () => {
   await app.start(+(process.env.PORT ?? 3978));
-  console.log(`\nLeaveAgent running on port ${process.env.PORT ?? 3978}`);
-  console.log(`Endpoint: http://localhost:${process.env.PORT ?? 3978}/api/messages\n`);
+  console.log(`\nLeaveAgent running on port ${process.env.PORT ?? 3978}\n`);
 })();

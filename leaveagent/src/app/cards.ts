@@ -2,12 +2,16 @@ import { IAdaptiveCard } from "@microsoft/teams.cards";
 import { LeaveRecord } from "./excelManager";
 
 export interface ApprovalCardData {
-  employeeName: string;
+  employeeName:  string;
   employeeEmail: string;
-  requestType: string;
-  date: string;
-  displayDate: string;
-  duration: string;
+  requestType:   string;
+  date:          string;
+  displayDate:   string;
+  duration:      string;
+  endDate?:      string | null;   // for multi-day
+  daysCount?:    number;          // working days
+  reason?:       string;          // optional reason
+  balanceResult?: any;            // leave balance info
 }
 
 export interface SimpleCardData {
@@ -60,38 +64,41 @@ function wrap(content: IAdaptiveCard): CardActivity {
 
 export function buildConfirmationCard(
   employeeName: string,
-  requestType: string,
-  displayDate: string,
-  duration: string
+  requestType:  string,
+  displayDate:  string,
+  duration:     string,
+  endDate?:     string | null,
+  daysCount?:   number,
+  reason?:      string,
+  balanceResult?: any
 ): CardActivity {
+  const facts: any[] = [
+    { title: "Employee", value: employeeName },
+    { title: "Type",     value: getTypeLabel(requestType) },
+    { title: "Date",     value: displayDate },
+  ];
+  if (endDate) facts.push({ title: "End Date", value: endDate });
+  if (daysCount) facts.push({ title: "Working Days", value: `${daysCount} day(s)` });
+  facts.push({ title: "Duration", value: duration });
+  if (reason) facts.push({ title: "Reason", value: reason });
+  if (balanceResult?.hasLop) {
+    facts.push({ title: "Leave Balance", value: `${balanceResult.balance} day(s)` });
+    facts.push({ title: "Granted", value: `${balanceResult.granted} day(s)` });
+    facts.push({ title: "Loss of Pay", value: `${balanceResult.lop} day(s) — contact HR` });
+  }
+  facts.push({ title: "Status", value: "Awaiting approval" });
+
   return wrap({
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
     type: "AdaptiveCard",
     version: "1.4",
     body: [
+      { type: "TextBlock", text: "Request Submitted", weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "FactSet", facts },
       {
         type: "TextBlock",
-        text: "Request Submitted",
-        weight: "Bolder",
-        size: "Large",
-        color: "Accent",
-      },
-      {
-        type: "FactSet",
-        facts: [
-          { title: "Employee", value: employeeName },
-          { title: "Type",     value: getTypeLabel(requestType) },
-          { title: "Date",     value: displayDate },
-          { title: "Duration", value: duration },
-          { title: "Status",   value: "Awaiting manager approval" },
-        ],
-      },
-      {
-        type: "TextBlock",
-        text: "Your manager has been notified and will review shortly.",
-        wrap: true,
-        color: "Good",
-        size: "Small",
+        text: "Your approver has been notified and will review shortly.",
+        wrap: true, color: "Good", size: "Small",
       },
     ],
   });
@@ -115,11 +122,19 @@ export function buildApprovalCardContent(data: ApprovalCardData): IAdaptiveCard 
       {
         type: "FactSet",
         facts: [
-          { title: "Employee", value: data.employeeName },
-          { title: "Email",    value: data.employeeEmail },
-          { title: "Type",     value: getTypeLabel(data.requestType) },
-          { title: "Date",     value: data.displayDate },
-          { title: "Duration", value: data.duration },
+          { title: "Employee",     value: data.employeeName },
+          { title: "Email",        value: data.employeeEmail },
+          { title: "Type",         value: getTypeLabel(data.requestType) },
+          { title: "Date",         value: data.displayDate },
+          ...(data.endDate ? [{ title: "End Date",     value: data.endDate }] : []),
+          ...(data.daysCount ? [{ title: "Working Days", value: `${data.daysCount} day(s)` }] : []),
+          { title: "Duration",     value: data.duration },
+          ...(data.reason ? [{ title: "Reason", value: data.reason }] : []),
+          ...(data.balanceResult?.hasLop ? [
+            { title: "Leave Balance", value: `${data.balanceResult.balance} day(s)` },
+            { title: "Granted",       value: `${data.balanceResult.granted} day(s)` },
+            { title: "LOP",           value: `${data.balanceResult.lop} day(s)` },
+          ] : []),
         ],
       },
       {

@@ -17,6 +17,7 @@ const employees = [
     teamlead_email:     "devtools@company.com",
     teamlead_teams_id:  "devtools",           // for devtools, all same
     teams_id:           "devtools",
+    leave_balance:      22,  // annual leave days
   },
   {
     name:               "Rahul",
@@ -29,6 +30,7 @@ const employees = [
     teamlead_email:     "suresh@company.com",
     teamlead_teams_id:  "REPLACE_SURESH_TEAMS_ID",
     teams_id:           "REPLACE_RAHUL_TEAMS_ID",
+    leave_balance:      22,
   },
   {
     name:               "Suresh",
@@ -41,6 +43,7 @@ const employees = [
     teamlead_email:     "",
     teamlead_teams_id:  "",
     teams_id:           "REPLACE_SURESH_TEAMS_ID",
+    leave_balance:      22,
   },
 ];
 
@@ -48,7 +51,7 @@ const wb = XLSX.utils.book_new();
 XLSX.utils.book_append_sheet(
   wb,
   XLSX.utils.json_to_sheet(employees, {
-    header: ["name","email","role","manager","manager_email","manager_teams_id","teamlead","teamlead_email","teamlead_teams_id","teams_id"],
+    header: ["name","email","role","manager","manager_email","manager_teams_id","teamlead","teamlead_email","teamlead_teams_id","teams_id","leave_balance"],
   }),
   "Employees"
 );
