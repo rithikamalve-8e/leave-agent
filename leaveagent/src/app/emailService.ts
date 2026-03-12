@@ -2,16 +2,19 @@
  * emailService.ts
  * Sends email notifications via Outlook / Office 365 SMTP.
  *
- * Manager and Team Lead are per-employee (from Employees.xlsx).
- * HR is a global address set in env/.env.local as HR_EMAIL.
+ * Approval chain depends on role (from Employees.xlsx):
  *
- * Email 1 — on request submission:
- *   To:  Manager
- *   CC:  Team Lead, HR
+ *   role = "employee"  → Team Lead approves
+ *                         To: Team Lead | CC: Manager, HR
  *
- * Email 2 — on approve/reject:
- *   To:  Employee
- *   CC:  Team Lead, HR
+ *   role = "teamlead"  → Manager approves
+ *                         To: Manager  | CC: HR
+ *
+ * On decision (approved/rejected):
+ *   role = "employee"  → To: Employee | CC: Manager, HR
+ *   role = "teamlead"  → To: Employee | CC: HR
+ *
+ * HR is global — set HR_EMAIL in env/.env.local
  */
 
 import nodemailer from "nodemailer";
@@ -30,10 +33,11 @@ const transporter = nodemailer.createTransport({
 export interface LeaveEmailData {
   employeeName:   string;
   employeeEmail:  string;
+  role:           "employee" | "teamlead";
   managerName:    string;
   managerEmail:   string;
-  teamleadName:   string;   // per-employee, from Employees.xlsx
-  teamleadEmail:  string;   // per-employee, from Employees.xlsx
+  teamleadName:   string;
+  teamleadEmail:  string;
   requestType:    string;
   displayDate:    string;
   duration:       string;
@@ -68,11 +72,39 @@ function buildTable(rows: Array<[string, string]>): string {
 // ── Email 1: New Request ───────────────────────────────────────────────────
 
 export async function sendRequestNotificationEmail(data: LeaveEmailData): Promise<void> {
-  const hrEmail  = process.env.HR_EMAIL ?? "";
-  // CC: team lead (per employee) + HR (global)
-  const ccList   = [data.teamleadEmail, hrEmail].filter(Boolean).join(",");
+  const hrEmail = process.env.HR_EMAIL ?? "";
+
+  let toEmail:   string;
+  let toName:    string;
+  let ccEmails:  string[];
+
+  if (data.role === "employee") {
+    // Employee: Team Lead approves, CC Manager + HR
+    toEmail  = data.teamleadEmail;
+    toName   = data.teamleadName;
+    ccEmails = [data.managerEmail, hrEmail].filter(Boolean);
+  } else {
+    // Team Lead: Manager approves, CC HR only
+    toEmail  = data.managerEmail;
+    toName   = data.managerName;
+    ccEmails = [hrEmail].filter(Boolean);
+  }
 
   const subject = `Leave Request: ${data.employeeName} - ${getTypeLabel(data.requestType)} on ${data.displayDate}`;
+
+  const rows: Array<[string, string]> = [
+    ["Employee",   data.employeeName],
+    ["Email",      data.employeeEmail],
+    ["Role",       data.role === "teamlead" ? "Team Lead" : "Employee"],
+    ["Type",       getTypeLabel(data.requestType)],
+    ["Date",       data.displayDate],
+    ["Duration",   data.duration],
+    ["Manager",    data.managerName],
+    ...(data.role === "employee"
+      ? [["Team Lead", data.teamleadName] as [string, string]]
+      : []),
+    ["Status",     "Pending Approval"],
+  ];
 
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
@@ -80,17 +112,8 @@ export async function sendRequestNotificationEmail(data: LeaveEmailData): Promis
         <h2 style="color:white;margin:0;">Leave Request Submitted</h2>
       </div>
       <div style="border:1px solid #e0e0e0;border-top:none;padding:24px;border-radius:0 0 8px 8px;">
-        <p>A new leave request has been submitted and requires your approval.</p>
-        ${buildTable([
-          ["Employee",   data.employeeName],
-          ["Email",      data.employeeEmail],
-          ["Type",       getTypeLabel(data.requestType)],
-          ["Date",       data.displayDate],
-          ["Duration",   data.duration],
-          ["Manager",    data.managerName],
-          ["Team Lead",  data.teamleadName],
-          ["Status",     "Pending Approval"],
-        ])}
+        <p>Hi ${toName}, a new leave request requires your approval.</p>
+        ${buildTable(rows)}
         <p style="color:#666;font-size:13px;">Please action this request in Microsoft Teams.</p>
       </div>
     </div>`;
@@ -98,12 +121,12 @@ export async function sendRequestNotificationEmail(data: LeaveEmailData): Promis
   try {
     await transporter.sendMail({
       from:    `"LeaveAgent" <${process.env.EMAIL_USER}>`,
-      to:      data.managerEmail,
-      cc:      ccList,
+      to:      toEmail,
+      cc:      ccEmails.join(","),
       subject,
       html,
     });
-    console.log(`[Email] Request sent -> To: ${data.managerEmail} | CC: ${ccList}`);
+    console.log(`[Email] Request sent -> To: ${toEmail} | CC: ${ccEmails.join(", ")}`);
   } catch (err) {
     console.warn(`[Email] Request notification failed:`, err);
   }
@@ -113,13 +136,34 @@ export async function sendRequestNotificationEmail(data: LeaveEmailData): Promis
 
 export async function sendDecisionEmail(data: LeaveEmailData): Promise<void> {
   const hrEmail    = process.env.HR_EMAIL ?? "";
-  // CC: team lead (per employee) + HR (global)
-  const ccList     = [data.teamleadEmail, hrEmail].filter(Boolean).join(",");
   const isApproved = data.status === "Approved";
   const statusText = isApproved ? "Approved" : "Rejected";
   const color      = isApproved ? "#107c10" : "#d13438";
 
+  let ccEmails: string[];
+
+  if (data.role === "employee") {
+    // CC Manager + HR
+    ccEmails = [data.managerEmail, hrEmail].filter(Boolean);
+  } else {
+    // Team Lead: CC HR only
+    ccEmails = [hrEmail].filter(Boolean);
+  }
+
   const subject = `Leave ${statusText}: ${data.employeeName} - ${getTypeLabel(data.requestType)} on ${data.displayDate}`;
+
+  const rows: Array<[string, string]> = [
+    ["Employee",    data.employeeName],
+    ["Type",        getTypeLabel(data.requestType)],
+    ["Date",        data.displayDate],
+    ["Duration",    data.duration],
+    ["Manager",     data.managerName],
+    ...(data.role === "employee"
+      ? [["Team Lead", data.teamleadName] as [string, string]]
+      : []),
+    ["Decision By", data.decidedBy ?? (data.role === "employee" ? data.teamleadName : data.managerName)],
+    ["Status",      statusText],
+  ];
 
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
@@ -127,21 +171,15 @@ export async function sendDecisionEmail(data: LeaveEmailData): Promise<void> {
         <h2 style="color:white;margin:0;">Leave Request ${statusText}</h2>
       </div>
       <div style="border:1px solid #e0e0e0;border-top:none;padding:24px;border-radius:0 0 8px 8px;">
-        <p>Your leave request has been <strong style="color:${color};">${statusText.toLowerCase()}</strong> by ${data.decidedBy ?? data.managerName}.</p>
-        ${buildTable([
-          ["Employee",    data.employeeName],
-          ["Type",        getTypeLabel(data.requestType)],
-          ["Date",        data.displayDate],
-          ["Duration",    data.duration],
-          ["Manager",     data.managerName],
-          ["Team Lead",   data.teamleadName],
-          ["Decision By", data.decidedBy ?? data.managerName],
-          ["Status",      statusText],
-        ])}
+        <p>Hi ${data.employeeName}, your leave request has been
+          <strong style="color:${color};">${statusText.toLowerCase()}</strong>
+          by ${data.decidedBy}.
+        </p>
+        ${buildTable(rows)}
         <p style="color:${color};">
           ${isApproved
             ? "Your leave is confirmed. Please ensure handover before your leave date."
-            : "Your request was not approved. Please speak with your manager for details."}
+            : "Your request was not approved. Please speak with your approver for details."}
         </p>
         <p style="color:#666;font-size:13px;">This notification was sent by LeaveAgent.</p>
       </div>
@@ -151,11 +189,11 @@ export async function sendDecisionEmail(data: LeaveEmailData): Promise<void> {
     await transporter.sendMail({
       from:    `"LeaveAgent" <${process.env.EMAIL_USER}>`,
       to:      data.employeeEmail,
-      cc:      ccList,
+      cc:      ccEmails.join(","),
       subject,
       html,
     });
-    console.log(`[Email] Decision sent -> To: ${data.employeeEmail} | CC: ${ccList}`);
+    console.log(`[Email] Decision sent -> To: ${data.employeeEmail} | CC: ${ccEmails.join(", ")}`);
   } catch (err) {
     console.warn(`[Email] Decision email failed:`, err);
   }

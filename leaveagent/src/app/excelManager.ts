@@ -16,11 +16,13 @@ const LEAVE_PATH     = path.join(DATA_DIR, "LeaveRequests.xlsx");
 export interface Employee {
   name:              string;
   email:             string;
+  role:              "employee" | "teamlead"; // "employee" or "teamlead"
   manager:           string;
   manager_email:     string;
   manager_teams_id:  string;
-  teamlead:          string;       // ADDED: per-employee team lead name
-  teamlead_email:    string;       // ADDED: per-employee team lead email
+  teamlead:          string;       // only used when role = "employee"
+  teamlead_email:    string;       // only used when role = "employee"
+  teamlead_teams_id: string;       // only used when role = "employee"
   teams_id:          string;
 }
 

@@ -2,7 +2,6 @@ import dotenv from "dotenv";
 dotenv.config({ path: "env/.env.local" });
 
 import { App } from "@microsoft/teams.apps";
-// AdaptiveCardActionMessageResponse types omitted — using "as any" to avoid SDK type mismatch
 import { DevtoolsPlugin } from "@microsoft/teams.dev";
 import { parseLeaveIntent } from "./app/groqParser";
 import {
@@ -58,8 +57,8 @@ app.on("message", async ({ activity, send, api }) => {
 
   const cmd = userMessage.toLowerCase();
 
-  if (cmd === "help") { await send(buildHelpCard()); return; }
-  if (cmd === "summary") { await send(buildDailySummaryCard(getTodaysAbsences())); return; }
+  if (cmd === "help")        { await send(buildHelpCard()); return; }
+  if (cmd === "summary")     { await send(buildDailySummaryCard(getTodaysAbsences())); return; }
   if (cmd === "my requests") {
     const mine = getAllLeaveRequests()
       .filter((r) => r.employee?.toLowerCase() === userName.toLowerCase())
@@ -91,6 +90,14 @@ app.on("message", async ({ activity, send, api }) => {
 
   const displayDate   = formatDisplayDate(intent.date);
   const durationLabel = intent.duration === "half_day" ? "Half Day" : "Full Day";
+  const isTeamLead    = employee.role === "teamlead";
+
+  // Who approves this request?
+  // - Employee  → Team Lead approves
+  // - Team Lead → Manager approves
+  const approverName     = isTeamLead ? employee.manager      : employee.teamlead;
+  const approverEmail    = isTeamLead ? employee.manager_email : employee.teamlead_email;
+  const approverTeamsId  = isTeamLead ? employee.manager_teams_id : employee.teamlead_teams_id;
 
   addLeaveRequest({
     employee:     userName,
@@ -103,24 +110,24 @@ app.on("message", async ({ activity, send, api }) => {
     requested_at: new Date().toISOString(),
   });
 
-  // Confirm to employee via Teams card
   await send(buildConfirmationCard(userName, intent.intent, displayDate, durationLabel));
 
-  // EMAIL 1: Notify manager, team lead, HR about new request
+  // EMAIL: notify approver (and relevant CC list based on role)
   await sendRequestNotificationEmail({
     employeeName:  userName,
     employeeEmail: employee.email,
+    role:          employee.role ?? "employee",
     managerName:   employee.manager,
-    managerEmail:   employee.manager_email,
-    teamleadName:   employee.teamlead,
-    teamleadEmail:  employee.teamlead_email,
-    requestType:    intent.intent,
+    managerEmail:  employee.manager_email,
+    teamleadName:  employee.teamlead,
+    teamleadEmail: employee.teamlead_email,
+    requestType:   intent.intent,
     displayDate,
-    duration:       durationLabel,
-    status:         "Pending",
+    duration:      durationLabel,
+    status:        "Pending",
   });
 
-  // Teams card to manager (inline for devtools, proactive in production)
+  // Teams approval card — send to approver
   const approvalCardPayload = buildApprovalCardContent({
     employeeName:  userName,
     employeeEmail: employee.email,
@@ -130,13 +137,13 @@ app.on("message", async ({ activity, send, api }) => {
     duration:      durationLabel,
   });
 
-  const managerRef        = getConversationRef(employee.manager_teams_id ?? "");
-  const managerIsSameUser = employee.manager_teams_id === userId;
-  const managerHasRef     = !!(managerRef?.conversationId);
+  const approverRef       = getConversationRef(approverTeamsId ?? "");
+  const approverIsSameUser = approverTeamsId === userId;
+  const approverHasRef    = !!(approverRef?.conversationId);
 
-  if (managerIsSameUser || !managerHasRef) {
-    // Devtools / demo: show approval card inline
-    await send("---- Manager Approval Request ----");
+  if (approverIsSameUser || !approverHasRef) {
+    // Devtools / demo: show inline
+    await send(`---- Approval Request for ${approverName} ----`);
     await send({
       type: "message",
       attachments: [{
@@ -145,19 +152,19 @@ app.on("message", async ({ activity, send, api }) => {
       }],
     } as any);
   } else {
-    // Production: send proactively to manager's conversation
+    // Production: proactive DM to approver
     try {
-      await api.conversations.activities(managerRef!.conversationId).create({
+      await api.conversations.activities(approverRef!.conversationId).create({
         type: "message",
         attachments: [{
           contentType: "application/vnd.microsoft.card.adaptive",
           content: approvalCardPayload,
         }],
       } as any);
-      console.log(`[LeaveAgent] Approval card sent to manager ${employee.manager}`);
+      console.log(`[LeaveAgent] Approval card sent to ${approverName}`);
     } catch (err) {
       console.warn(`[LeaveAgent] Proactive failed, showing inline:`, err);
-      await send("---- Manager Approval Request ----");
+      await send(`---- Approval Request for ${approverName} ----`);
       await send({
         type: "message",
         attachments: [{
@@ -169,23 +176,19 @@ app.on("message", async ({ activity, send, api }) => {
   }
 });
 
-// ── Card Actions: Manager clicks Approve / Reject ──────────────────────────
+// ── Card Actions: Approver clicks Approve / Reject ─────────────────────────
 
 app.on("card.action", async ({ activity, send, api }) => {
-  const data        = (activity.value as any)?.action?.data;
-  const managerName = activity.from.name ?? "Manager";
+  const data         = (activity.value as any)?.action?.data;
+  const approverName = activity.from.name ?? "Approver";
 
-  console.log(`[LeaveAgent] card.action from ${managerName}:`, data);
+  console.log(`[LeaveAgent] card.action from ${approverName}:`, data);
 
   if (!data?.action || !data?.employeeName || !data?.date) {
     return {
-      statusCode: 400,
-      type: "application/vnd.microsoft.error",
-      value: {
-        code: "BadRequest",
-        message: "Invalid card data",
-        innerHttpError: { statusCode: 400, body: { error: "Missing fields" } },
-      },
+      statusCode: 200,
+      type: "application/vnd.microsoft.card.adaptive",
+      value: buildAlreadyProcessedCardContent() as any,
     } as any;
   }
 
@@ -193,7 +196,7 @@ app.on("card.action", async ({ activity, send, api }) => {
   const status: "Approved" | "Rejected" = action === "approve" ? "Approved" : "Rejected";
   const displayDate = formatDisplayDate(date);
 
-  const updated = updateLeaveStatus(employeeName, date, status, managerName);
+  const updated = updateLeaveStatus(employeeName, date, status, approverName);
   if (!updated) {
     return {
       statusCode: 200,
@@ -204,25 +207,27 @@ app.on("card.action", async ({ activity, send, api }) => {
 
   const employee = findEmployee(employeeName);
   const cardData  = { employeeName, requestType, date, displayDate };
+  const isTeamLead = employee?.role === "teamlead";
 
-  // EMAIL 2: Notify employee of decision, CC team lead + HR
+  // EMAIL: notify employee of decision (CC list based on role)
   if (employee) {
     await sendDecisionEmail({
       employeeName,
       employeeEmail: employee.email,
-      managerName,
-      managerEmail:   employee.manager_email,
-      teamleadName:   employee.teamlead,
-      teamleadEmail:  employee.teamlead_email,
+      role:          employee.role ?? "employee",
+      managerName:   employee.manager,
+      managerEmail:  employee.manager_email,
+      teamleadName:  employee.teamlead,
+      teamleadEmail: employee.teamlead_email,
       requestType,
       displayDate,
-      duration:       "Full Day",
+      duration:      "Full Day",
       status,
-      decidedBy:      managerName,
+      decidedBy:     approverName,
     });
   }
 
-  // Teams notification to employee
+  // Teams: notify employee inline (devtools) or proactive DM (production)
   const employeeRef        = getConversationRef(employee?.teams_id ?? "");
   const employeeIsSameConv = !employeeRef?.conversationId ||
     employeeRef.conversationId === activity.conversation.id;
@@ -233,7 +238,7 @@ app.on("card.action", async ({ activity, send, api }) => {
       type: "message",
       attachments: [{
         contentType: "application/vnd.microsoft.card.adaptive",
-        content: buildStatusCardContent(requestType, displayDate, status, managerName),
+        content: buildStatusCardContent(requestType, displayDate, status, approverName),
       }],
     } as any);
   } else {
@@ -242,7 +247,7 @@ app.on("card.action", async ({ activity, send, api }) => {
         type: "message",
         attachments: [{
           contentType: "application/vnd.microsoft.card.adaptive",
-          content: buildStatusCardContent(requestType, displayDate, status, managerName),
+          content: buildStatusCardContent(requestType, displayDate, status, approverName),
         }],
       } as any);
       console.log(`[LeaveAgent] DMed employee ${employeeName}`);
@@ -259,7 +264,7 @@ app.on("card.action", async ({ activity, send, api }) => {
       date,
       duration:     "full_day",
       status:       "Approved",
-      approved_by:  managerName,
+      approved_by:  approverName,
       requested_at: new Date().toISOString(),
     }));
   }
@@ -268,8 +273,8 @@ app.on("card.action", async ({ activity, send, api }) => {
     statusCode: 200,
     type: "application/vnd.microsoft.card.adaptive",
     value: (status === "Approved"
-      ? buildApprovedCardContent(cardData, managerName)
-      : buildRejectedCardContent(cardData, managerName)) as any,
+      ? buildApprovedCardContent(cardData, approverName)
+      : buildRejectedCardContent(cardData, approverName)) as any,
   } as any;
 });
 
