@@ -1,6 +1,6 @@
 import { IAdaptiveCard } from "@microsoft/teams.cards";
 import { LeaveRecord } from "./excelManager";
-
+ 
 export interface ApprovalCardData {
   employeeName:  string;
   employeeEmail: string;
@@ -13,14 +13,14 @@ export interface ApprovalCardData {
   reason?:       string;          // optional reason
   balanceResult?: any;            // leave balance info
 }
-
+ 
 export interface SimpleCardData {
   employeeName: string;
   requestType: string;
   date: string;
   displayDate: string;
 }
-
+ 
 export interface CardActivity {
   type: "message";
   attachments: Array<{
@@ -28,7 +28,7 @@ export interface CardActivity {
     content: IAdaptiveCard;
   }>;
 }
-
+ 
 export function formatDisplayDate(isoDate: string): string {
   if (!isoDate) return "Unknown date";
   try {
@@ -43,25 +43,28 @@ export function formatDisplayDate(isoDate: string): string {
     return isoDate;
   }
 }
-
+ 
 export function getTypeLabel(type: string): string {
   switch (type?.toUpperCase()) {
-    case "WFH":   return "Work From Home";
-    case "LEAVE": return "Planned Leave";
-    case "SICK":  return "Sick Leave";
-    default:      return "Leave Request";
+    case "WFH":       return "Work From Home";
+    case "LEAVE":     return "Planned Leave";
+    case "SICK":      return "Sick Leave";
+    case "MATERNITY": return "Maternity Leave";
+    case "PATERNITY": return "Paternity Leave";
+    case "MARRIAGE":  return "Marriage Leave";
+    default:          return "Leave Request";
   }
 }
-
+ 
 function wrap(content: IAdaptiveCard): CardActivity {
   return {
     type: "message",
     attachments: [{ contentType: "application/vnd.microsoft.card.adaptive", content }],
   };
 }
-
+ 
 // ── Confirmation Card ──────────────────────────────────────────────────────
-
+ 
 export function buildConfirmationCard(
   employeeName: string,
   requestType:  string,
@@ -87,7 +90,7 @@ export function buildConfirmationCard(
     facts.push({ title: "Loss of Pay", value: `${balanceResult.lop} day(s) — contact HR` });
   }
   facts.push({ title: "Status", value: "Awaiting approval" });
-
+ 
   return wrap({
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
     type: "AdaptiveCard",
@@ -103,9 +106,9 @@ export function buildConfirmationCard(
     ],
   });
 }
-
+ 
 // ── Approval Card ──────────────────────────────────────────────────────────
-
+ 
 export function buildApprovalCardContent(data: ApprovalCardData): IAdaptiveCard {
   return {
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -170,9 +173,9 @@ export function buildApprovalCardContent(data: ApprovalCardData): IAdaptiveCard 
     ],
   };
 }
-
+ 
 // ── Approved Card ──────────────────────────────────────────────────────────
-
+ 
 export function buildApprovedCardContent(data: SimpleCardData, approvedBy: string): IAdaptiveCard {
   return {
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -199,9 +202,9 @@ export function buildApprovedCardContent(data: SimpleCardData, approvedBy: strin
     ],
   };
 }
-
+ 
 // ── Rejected Card ──────────────────────────────────────────────────────────
-
+ 
 export function buildRejectedCardContent(data: SimpleCardData, rejectedBy: string): IAdaptiveCard {
   return {
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -228,9 +231,9 @@ export function buildRejectedCardContent(data: SimpleCardData, rejectedBy: strin
     ],
   };
 }
-
+ 
 // ── Status Card ────────────────────────────────────────────────────────────
-
+ 
 export function buildStatusCardContent(
   requestType: string,
   displayDate: string,
@@ -270,9 +273,9 @@ export function buildStatusCardContent(
     ],
   };
 }
-
+ 
 // ── Announcement Card ──────────────────────────────────────────────────────
-
+ 
 export function buildAnnouncementCard(record: LeaveRecord): CardActivity {
   return wrap({
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -299,20 +302,20 @@ export function buildAnnouncementCard(record: LeaveRecord): CardActivity {
     ],
   });
 }
-
+ 
 // ── Daily Summary Card ─────────────────────────────────────────────────────
-
+ 
 export function buildDailySummaryCard(records: LeaveRecord[]): CardActivity {
   const today = new Date().toLocaleDateString("en-IN", {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
   });
-
+ 
   const wfh   = records.filter((r) => r.type === "WFH");
   const leave = records.filter((r) => r.type === "LEAVE");
   const sick  = records.filter((r) => r.type === "SICK");
   const toList = (arr: LeaveRecord[]) =>
     arr.length > 0 ? arr.map((r) => `- ${r.employee}`).join("\n") : "None";
-
+ 
   return wrap({
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
     type: "AdaptiveCard",
@@ -356,9 +359,9 @@ export function buildDailySummaryCard(records: LeaveRecord[]): CardActivity {
     ],
   });
 }
-
+ 
 // ── Help Card ──────────────────────────────────────────────────────────────
-
+ 
 export function buildHelpCard(): CardActivity {
   return wrap({
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -380,9 +383,9 @@ export function buildHelpCard(): CardActivity {
     ],
   });
 }
-
+ 
 // ── My Requests Card ───────────────────────────────────────────────────────
-
+ 
 export function buildMyRequestsCard(userName: string, records: LeaveRecord[]): CardActivity {
   if (records.length === 0) {
     return wrap({
@@ -392,7 +395,7 @@ export function buildMyRequestsCard(userName: string, records: LeaveRecord[]): C
       body: [{ type: "TextBlock", text: "No leave requests found.", wrap: true }],
     });
   }
-
+ 
   return wrap({
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
     type: "AdaptiveCard",
@@ -409,9 +412,9 @@ export function buildMyRequestsCard(userName: string, records: LeaveRecord[]): C
     ],
   });
 }
-
+ 
 // ── Already Processed Card ─────────────────────────────────────────────────
-
+ 
 export function buildAlreadyProcessedCardContent(): IAdaptiveCard {
   return {
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",

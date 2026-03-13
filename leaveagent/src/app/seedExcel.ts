@@ -1,22 +1,22 @@
 import * as XLSX from "xlsx";
 import * as path from "path";
 import * as fs   from "fs";
-
+ 
 const DATA_DIR = path.join(process.cwd(), "data");
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
-
+ 
 const employees = [
   {
     name:               "devtools",
-    email:              "devtools@company.com",
+    email:              "rithika.mr@8thelement.ai",
     role:               "employee",           // "employee" or "teamlead"
-    manager:            "devtools",
-    manager_email:      "devtools@company.com",
-    manager_teams_id:   "devtools",
-    teamlead:           "devtools",
-    teamlead_email:     "devtools@company.com",
-    teamlead_teams_id:  "devtools",           // for devtools, all same
-    teams_id:           "devtools",
+    manager:            "varsha",
+    manager_email:      "varsha.m@8thelement.ai",
+    manager_teams_id:   "28e6afa3-0515-4a5f-add5-9e70e3f68123",
+    teamlead:           "varsha",
+    teamlead_email:     "varsha.m@8thelement.ai",
+    teamlead_teams_id:  "28e6afa3-56a5-4342-8d1b-4714fa77d546",           // for devtools, all same
+    teams_id:           "a37249d6-7813-4258-922f-a7bc07291378",
     leave_balance:      22,  // annual leave days
   },
   {
@@ -46,7 +46,7 @@ const employees = [
     leave_balance:      22,
   },
 ];
-
+ 
 const wb = XLSX.utils.book_new();
 XLSX.utils.book_append_sheet(
   wb,
@@ -57,7 +57,7 @@ XLSX.utils.book_append_sheet(
 );
 XLSX.writeFile(wb, path.join(DATA_DIR, "Employees.xlsx"));
 console.log("Employees.xlsx created.");
-
+ 
 const wb2 = XLSX.utils.book_new();
 XLSX.utils.book_append_sheet(
   wb2,
