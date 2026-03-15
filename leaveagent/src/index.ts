@@ -36,7 +36,26 @@ const app = new App({
   clientSecret: process.env.MICROSOFT_APP_PASSWORD ?? process.env.BOT_PASSWORD ?? "",
   tenantId:     process.env.MICROSOFT_APP_TENANT_ID ?? "",
   plugins: [new DevtoolsPlugin()],
-}); 
+});
+
+// ── Helper: send text message to announcement channel ─────────────────────
+
+async function sendAnnouncement(api: any, botId: string, message: string) {
+  const announcementConvId = process.env.ANNOUNCEMENT_CHANNEL_ID;
+  if (!announcementConvId) return;
+  try {
+    await api.conversations.activities(announcementConvId).create({
+      type:         "message",
+      text:         message,
+      from:         { id: botId },
+      conversation: { id: announcementConvId },
+    } as any);
+    console.log(`[LeaveAgent] Announcement sent: ${message}`);
+  } catch (err) {
+    console.warn(`[LeaveAgent] Could not send announcement:`, err);
+  }
+}
+
 // ── Incoming Messages ──────────────────────────────────────────────────────
  
 app.on("message", async ({ activity, send, api }) => {
@@ -47,78 +66,84 @@ app.on("message", async ({ activity, send, api }) => {
   console.log(`[LeaveAgent] "${userMessage}" from ${userName} (${userId})`);
  
   saveConversationRef(userId, {
-    userId,
-    userName,
-    conversationId: activity.conversation.id,
-    serviceUrl:     activity.serviceUrl,
-    tenantId:       activity.conversation.tenantId,
-    botId:          activity.recipient?.id ?? "bot",
-  });
-  // ── Intercept card button clicks misrouted as messages ─────────────────
-const activityValue = (activity as any).value;
-if (activityValue?.action === "approve" || activityValue?.action === "reject") {
-  const data         = activityValue;
-  const approverName = userName;
-  const { action, employeeName, date, requestType = "WFH" } = data;
-  const status: "Approved" | "Rejected" = action === "approve" ? "Approved" : "Rejected";
-  const displayDate = formatDisplayDate(date);
+  userId,
+  userName,
+  conversationId: activity.conversation.id,
+  serviceUrl:     activity.serviceUrl,
+  tenantId:       activity.conversation.tenantId,
+  botId:          activity.recipient?.id ?? "bot",
+}, activity.conversation.id.startsWith("a:")); // true = personal DM
 
-  const updated = updateLeaveStatus(employeeName, date, status, approverName);
-  if (!updated) {
-    await send("This request has already been processed.");
+  // ── Intercept card button clicks misrouted as messages ─────────────────
+  const activityValue = (activity as any).value;
+  if (activityValue?.action === "approve" || activityValue?.action === "reject") {
+    const data         = activityValue;
+    const approverName = userName;
+    const { action, employeeName, date, requestType = "WFH" } = data;
+    const status: "Approved" | "Rejected" = action === "approve" ? "Approved" : "Rejected";
+    const displayDate = formatDisplayDate(date);
+
+    const updated = updateLeaveStatus(employeeName, date, status, approverName);
+    if (!updated) {
+      await send("This request has already been processed.");
+      return;
+    }
+
+    const employee   = findEmployee(employeeName);
+    const allRecords = getAllLeaveRequests();
+    const leaveRecord = allRecords.find(
+      (r) => r.employee?.toLowerCase() === employeeName.toLowerCase() && r.date === date
+    );
+    const actualDuration  = leaveRecord?.duration ?? "full_day";
+    const actualDaysCount = leaveRecord?.days_count ?? 1;
+
+    await send(`Request ${status} for ${employeeName} on ${displayDate}.`);
+
+    const employeeRef = getConversationRef(employee?.teams_id ?? "");
+    console.log(`[DEBUG] employeeRef:`, JSON.stringify(employeeRef));
+    console.log(`[DEBUG] activity.conversation.id:`, activity.conversation.id);
+    console.log(`[DEBUG] employee?.teams_id:`, employee?.teams_id);
+
+    if (employeeRef?.conversationId && employee?.teams_id !== activity.from.id) {
+      try {
+        await api.conversations.activities(employeeRef.conversationId).create({
+          type:         "message",
+          from:         { id: employeeRef.botId },
+          conversation: { id: employeeRef.conversationId },
+          recipient:    { id: employee?.teams_id },
+          attachments:  [{ contentType: "application/vnd.microsoft.card.adaptive", content: buildStatusCardContent(requestType, displayDate, status, approverName) }],
+        } as any);
+      } catch (err) {
+        console.warn(`[LeaveAgent] Could not DM employee:`, err);
+      }
+    } else {
+      await send({
+        type: "message",
+        attachments: [{ contentType: "application/vnd.microsoft.card.adaptive", content: buildStatusCardContent(requestType, displayDate, status, approverName) }],
+      } as any);
+    }
+
+    if (status === "Approved" && employee) {
+      const typeLabel =
+        requestType === "WFH"       ? "working from home" :
+        requestType === "SICK"      ? "on sick leave" :
+        requestType === "LEAVE"     ? "on planned leave" :
+        requestType === "MATERNITY" ? "on maternity leave" :
+        requestType === "PATERNITY" ? "on paternity leave" :
+        requestType === "MARRIAGE"  ? "on marriage leave" :
+        requestType === "ADOPTION"  ? "on adoption leave" : "unavailable";
+
+      const todayStr   = new Date().toISOString().split("T")[0];
+      const datePhrase = date === todayStr ? "today" : `on ${displayDate}`;
+      const message    = leaveRecord?.end_date && leaveRecord.end_date !== date
+        ? `📅 ${employeeName} will be ${typeLabel} from ${displayDate} to ${formatDisplayDate(leaveRecord.end_date)}.`
+        : `📅 ${employeeName} will be ${typeLabel} ${datePhrase}.`;
+
+      await sendAnnouncement(api, activity.recipient?.id ?? "", message);
+    }
     return;
   }
 
-  const employee   = findEmployee(employeeName);
-  const allRecords = getAllLeaveRequests();
-  const leaveRecord = allRecords.find(
-    (r) => r.employee?.toLowerCase() === employeeName.toLowerCase() && r.date === date
-  );
-  const actualDuration  = leaveRecord?.duration ?? "full_day";
-  const actualDaysCount = leaveRecord?.days_count ?? 1;
-  const durationLabel   = actualDuration === "half_day" ? "Half Day" : actualDuration === "multi_day" ? "Multiple Days" : "Full Day";
-
-  await send(`Request ${status} for ${employeeName} on ${displayDate}.`);
-
-  const employeeRef = getConversationRef(employee?.teams_id ?? "");
-  console.log(`[DEBUG] employeeRef:`, JSON.stringify(employeeRef));
-  console.log(`[DEBUG] activity.conversation.id:`, activity.conversation.id);
-  console.log(`[DEBUG] employee?.teams_id:`, employee?.teams_id);
-  if (employeeRef?.conversationId && employee?.teams_id !== activity.from.id)  {
-    try {
-      await api.conversations.activities(employeeRef.conversationId).create({
-        type:         "message",
-        from:         { id: employeeRef.botId },
-        conversation: { id: employeeRef.conversationId },
-        recipient:    { id: employee?.teams_id },
-        attachments:  [{ contentType: "application/vnd.microsoft.card.adaptive", content: buildStatusCardContent(requestType, displayDate, status, approverName) }],
-      } as any);
-    } catch (err) {
-      console.warn(`[LeaveAgent] Could not DM employee:`, err);
-    }
-  } else {
-    await send({
-      type: "message",
-      attachments: [{ contentType: "application/vnd.microsoft.card.adaptive", content: buildStatusCardContent(requestType, displayDate, status, approverName) }],
-    } as any);
-  }
-
-  if (status === "Approved" && employee) {
-    await send(buildAnnouncementCard({
-      employee:     employeeName,
-      email:        employee.email,
-      type:         requestType,
-      date,
-      end_date:     leaveRecord?.end_date,
-      duration:     actualDuration,
-      days_count:   actualDaysCount,
-      status:       "Approved",
-      approved_by:  approverName,
-      requested_at: new Date().toISOString(),
-    }));
-  }
-  return;
-}
   const cmd = userMessage.toLowerCase();
  
   // ── Special commands ───────────────────────────────────────────────
@@ -180,7 +205,6 @@ if (activityValue?.action === "approve" || activityValue?.action === "reject") {
     return;
   }
  
- 
   // ── Test approve/reject command (devtools only) ──────────────────
   const approveMatch = userMessage.match(/^(approve|reject) leave (\S+) (\d{4}-\d{2}-\d{2})$/i);
   if (approveMatch) {
@@ -198,7 +222,6 @@ if (activityValue?.action === "approve" || activityValue?.action === "reject") {
     return;
   }
  
- 
   // ── Block requests on behalf of others ──────────────────────────
   const onBehalfMatch = userMessage.match(/(?:leave|wfh|sick)\s+for\s+(\w+)/i);
   if (onBehalfMatch) {
@@ -210,8 +233,8 @@ if (activityValue?.action === "approve" || activityValue?.action === "reject") {
       return;
     }
   }
+
   // ── AI intent parsing ──────────────────────────────────────────────
- 
   await send("Processing your request...");
  
   const intent = await parseLeaveIntent(userMessage);
@@ -285,7 +308,6 @@ if (activityValue?.action === "approve" || activityValue?.action === "reject") {
     balanceResult,
   ));
  
- 
   const approvalCardPayload = buildApprovalCardContent({
     employeeName:  userName,
     employeeEmail: employee.email,
@@ -312,12 +334,12 @@ if (activityValue?.action === "approve" || activityValue?.action === "reject") {
   } else {
     try {
       await api.conversations.activities(approverRef!.conversationId).create({
-      type:         "message",
-      from:         { id: approverRef!.botId },
-      conversation: { id: approverRef!.conversationId },
-      recipient:    { id: approverTeamsId },
-      attachments:  [{ contentType: "application/vnd.microsoft.card.adaptive", content: approvalCardPayload }],
-    } as any);
+        type:         "message",
+        from:         { id: approverRef!.botId },
+        conversation: { id: approverRef!.conversationId },
+        recipient:    { id: approverTeamsId },
+        attachments:  [{ contentType: "application/vnd.microsoft.card.adaptive", content: approvalCardPayload }],
+      } as any);
       console.log(`[LeaveAgent] Approval card sent to ${approverName}`);
     } catch (err) {
       console.warn(`[LeaveAgent] Proactive failed, showing inline:`, err);
@@ -360,11 +382,7 @@ app.on("card.action", async ({ activity, send, api }) => {
   );
   const actualDuration  = leaveRecord?.duration  ?? "full_day";
   const actualDaysCount = leaveRecord?.days_count ?? 1;
-  const durationLabel   = actualDuration === "half_day"
-    ? "Half Day"
-    : actualDuration === "multi_day"
-    ? "Multiple Days"
-    : "Full Day";
+  const durationLabel   = actualDuration === "half_day" ? "Half Day" : actualDuration === "multi_day" ? "Multiple Days" : "Full Day";
  
   const employeeRef        = getConversationRef(employee?.teams_id ?? "");
   const employeeIsSameConv = !employeeRef?.conversationId ||
@@ -379,12 +397,12 @@ app.on("card.action", async ({ activity, send, api }) => {
   } else {
     try {
       await api.conversations.activities(employeeRef!.conversationId).create({
-      type:         "message",
-      from:         { id: employeeRef!.botId },
-      conversation: { id: employeeRef!.conversationId },
-      recipient:    { id: employee?.teams_id },
-      attachments:  [{ contentType: "application/vnd.microsoft.card.adaptive", content: buildStatusCardContent(requestType, displayDate, status, approverName) }],
-    } as any);
+        type:         "message",
+        from:         { id: employeeRef!.botId },
+        conversation: { id: employeeRef!.conversationId },
+        recipient:    { id: employee?.teams_id },
+        attachments:  [{ contentType: "application/vnd.microsoft.card.adaptive", content: buildStatusCardContent(requestType, displayDate, status, approverName) }],
+      } as any);
       console.log(`[LeaveAgent] DMed employee ${employeeName}`);
     } catch (err) {
       console.warn(`[LeaveAgent] Could not DM employee:`, err);
@@ -392,18 +410,22 @@ app.on("card.action", async ({ activity, send, api }) => {
   }
  
   if (status === "Approved" && employee) {
-    await send(buildAnnouncementCard({
-      employee:     employeeName,
-      email:        employee.email,
-      type:         requestType,
-      date,
-      end_date:     leaveRecord?.end_date,
-      duration:     actualDuration,
-      days_count:   actualDaysCount,
-      status:       "Approved",
-      approved_by:  approverName,
-      requested_at: new Date().toISOString(),
-    }));
+    const typeLabel =
+      requestType === "WFH"       ? "working from home" :
+      requestType === "SICK"      ? "on sick leave" :
+      requestType === "LEAVE"     ? "on planned leave" :
+      requestType === "MATERNITY" ? "on maternity leave" :
+      requestType === "PATERNITY" ? "on paternity leave" :
+      requestType === "MARRIAGE"  ? "on marriage leave" :
+      requestType === "ADOPTION"  ? "on adoption leave" : "unavailable";
+
+    const todayStr   = new Date().toISOString().split("T")[0];
+    const datePhrase = date === todayStr ? "today" : `on ${displayDate}`;
+    const message    = leaveRecord?.end_date && leaveRecord.end_date !== date
+      ? `📅 ${employeeName} will be ${typeLabel} from ${displayDate} to ${formatDisplayDate(leaveRecord.end_date)}.`
+      : `📅 ${employeeName} will be ${typeLabel} ${datePhrase}.`;
+
+    await sendAnnouncement(api, activity.recipient?.id ?? "", message);
   }
  
   return {
@@ -424,10 +446,99 @@ app.on("install.add", async ({ send }) => {
     "Type 'help' for all commands."
   );
 });
+
+// ── Daily Morning Summary ──────────────────────────────────────────────────
+
+function scheduleDailySummary() {
+  const announcementConvId = process.env.ANNOUNCEMENT_CHANNEL_ID;
+  if (!announcementConvId) {
+    console.log("[LeaveAgent] No ANNOUNCEMENT_CHANNEL_ID — daily summary disabled.");
+    return;
+  }
+
+  function msUntil9am(): number {
+    const now     = new Date();
+    const next9am = new Date();
+    next9am.setHours(9, 0, 0, 0);
+    if (now >= next9am) next9am.setDate(next9am.getDate() + 1);
+    return next9am.getTime() - now.getTime();
+  }
+
+  async function postDailySummary() {
+    const today = new Date();
+    if (today.getDay() === 0 || today.getDay() === 6) return; // skip weekends
+
+    const todayStr     = today.toISOString().split("T")[0];
+    const allRecords   = getAllLeaveRequests();
+    const todayRecords = allRecords.filter(
+      (r) => r.date === todayStr && r.status === "Approved"
+    );
+
+    if (todayRecords.length === 0) return;
+
+    const wfh   = todayRecords.filter((r) => r.type === "WFH").map((r)  => r.employee);
+    const leave = todayRecords.filter((r) => r.type !== "WFH").map((r)  => r.employee);
+
+    const dateLabel = today.toLocaleDateString("en-GB", { day: "numeric", month: "long" });
+    let msg = `📋 Workforce Availability – ${dateLabel}:`;
+    if (wfh.length)              msg += ` WFH: ${wfh.join(", ")}`;
+    if (wfh.length && leave.length) msg += " |";
+    if (leave.length)            msg += ` Leave: ${leave.join(", ")}`;
+
+    const botId      = process.env.BOT_ID ?? process.env.MICROSOFT_APP_ID ?? "";
+    const serviceUrl = process.env.BOT_SERVICE_URL ?? "https://smba.trafficmanager.net/in/";
+
+    try {
+      // Use node-fetch style call since we don't have api context here
+      const token = await getBotToken();
+      const res   = await fetch(`${serviceUrl}v3/conversations/${announcementConvId}/activities`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body:    JSON.stringify({ type: "message", text: msg }),
+      });
+      if (res.ok) {
+        console.log(`[LeaveAgent] Daily summary sent: ${msg}`);
+      } else {
+        console.warn(`[LeaveAgent] Daily summary failed: ${res.status}`);
+      }
+    } catch (err) {
+      console.warn("[LeaveAgent] Daily summary error:", err);
+    }
+  }
+
+  const ms = msUntil9am();
+  const h  = Math.floor(ms / 3600000);
+  const m  = Math.floor((ms % 3600000) / 60000);
+  console.log(`[LeaveAgent] Daily summary scheduled — first run in ${h}h ${m}m`);
+
+  setTimeout(() => {
+    postDailySummary();
+    setInterval(postDailySummary, 24 * 60 * 60 * 1000);
+  }, ms);
+}
+
+async function getBotToken(): Promise<string> {
+  const clientId     = process.env.MICROSOFT_APP_ID     ?? process.env.BOT_ID       ?? "";
+  const clientSecret = process.env.MICROSOFT_APP_PASSWORD ?? process.env.BOT_PASSWORD ?? "";
+  const tenantId     = process.env.MICROSOFT_APP_TENANT_ID ?? "botframework.com";
+
+  const url  = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+  const body = new URLSearchParams({
+    grant_type:    "client_credentials",
+    client_id:     clientId,
+    client_secret: clientSecret,
+    scope:         "https://api.botframework.com/.default",
+  });
+
+  const res  = await fetch(url, { method: "POST", body });
+  const json = await res.json() as any;
+  return json.access_token ?? "";
+}
  
 // ── Start ──────────────────────────────────────────────────────────────────
  
 (async () => {
   await app.start(+(process.env.PORT ?? 3978));
   console.log(`\nLeaveAgent running on port ${process.env.PORT ?? 3978}\n`);
+  scheduleDailySummary();
 })();
