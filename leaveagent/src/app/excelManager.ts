@@ -101,10 +101,9 @@ export function saveConversationRef(userId: string, ref: ConversationRef, isPers
   const existing = conversationRefs.get(userId);
   const existingIsPersonal = existing?.conversationId?.startsWith("a:");
   
-  // Only save if: no existing ref, OR new one is personal, OR existing is also a group
   if (!existing || isPersonal || !existingIsPersonal) {
     conversationRefs.set(userId, ref);
-    console.log(`[Excel] Saved conversation ref for ${ref.userName} (${userId}) [${isPersonal ? "personal" : "group"}]`);
+    console.log(`[Excel] Saved conversation ref for ${ref.userName} [${isPersonal ? "personal" : "group"}]`);
   }
 }
 
