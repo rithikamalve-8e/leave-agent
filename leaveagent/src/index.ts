@@ -426,8 +426,8 @@ app.on("card.action", async ({ activity, send, api }) => {
     const todayStr   = new Date().toISOString().split("T")[0];
     const datePhrase = date === todayStr ? "today" : `on ${displayDate}`;
     const message    = leaveRecord?.end_date && leaveRecord.end_date !== date
-      ? `📅 ${employeeName} will be ${getTypeLabel(requestType)} from ${displayDate} to ${formatDisplayDate(leaveRecord.end_date)}.`
-      : `📅 ${employeeName} will be ${getTypeLabel(requestType)} ${datePhrase}.`;
+      ? ` ${employeeName} will be ${getTypeLabel(requestType)} from ${displayDate} to ${formatDisplayDate(leaveRecord.end_date)}.`
+      : ` ${employeeName} will be ${getTypeLabel(requestType)} ${datePhrase}.`;
 
     // Post plain text to group channel
     await sendAnnouncement(api, activity.recipient?.id ?? "", message);
@@ -485,7 +485,7 @@ function scheduleDailySummary() {
     const leave = todayRecords.filter((r) => r.type !== "WFH").map((r) => r.employee);
 
     const dateLabel = today.toLocaleDateString("en-GB", { day: "numeric", month: "long" });
-    let msg = `📋 Workforce Availability – ${dateLabel}:`;
+    let msg = ` Workforce Availability – ${dateLabel}:`;
     if (wfh.length)                  msg += ` WFH: ${wfh.join(", ")}`;
     if (wfh.length && leave.length)  msg += " |";
     if (leave.length)                msg += ` Leave: ${leave.join(", ")}`;
