@@ -398,7 +398,7 @@ Output: {"intent":"UNKNOWN","date":"","duration":"full_day","needs_clarification
 // VALIDATION GUARD
 // ─────────────────────────────────────────────
 
-function validateParsedIntent(raw: RawLLMOutput): ParsedLeaveIntent {
+function validateParsedIntent(raw: RawLLMOutput, originalMessage: string = ""): ParsedLeaveIntent {
   const today     = getTodayStr();
   const todayDate = parseLocalDate(today);
   let   parsed    = { ...raw };
@@ -426,8 +426,11 @@ function validateParsedIntent(raw: RawLLMOutput): ParsedLeaveIntent {
     const isNextMonth =
       (parsedMonth === (currentMonth + 1) % 12) &&
       (parsedYear === currentYear + (currentMonth === 11 ? 1 : 0));
+    const monthNames = ["january","february","march","april","may","june",
+                    "july","august","september","october","november","december"];
+    const userMentionedMonth = monthNames.some(m => originalMessage.toLowerCase().includes(m));
 
-    if (isNextMonth) {
+    if (isNextMonth && !userMentionedMonth) {
       const thisMonthSameDay = new Date(currentYear, currentMonth, parsedDate.getDate());
       const isStillUpcoming  = thisMonthSameDay > todayDate;
       const isNotWeekend     = !isWeekend(thisMonthSameDay);
@@ -591,7 +594,7 @@ export async function parseLeaveIntent(
     }
     llmOutput.confidence = Math.max(0, Math.min(1, llmOutput.confidence));
 
-    return validateParsedIntent(llmOutput);
+    return validateParsedIntent(llmOutput, userMessage);
 
   } catch (err) {
     console.error("[leaveParser] OpenAI API error:", err);
