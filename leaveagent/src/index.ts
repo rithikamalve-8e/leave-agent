@@ -525,7 +525,6 @@ async function getBotToken(): Promise<string> {
 }
  
 // ── Start ──────────────────────────────────────────────────────────────────
- 
 (async () => {
   await app.start(+(process.env.PORT ?? 3978));
   console.log(`\nLeaveAgent running on port ${process.env.PORT ?? 3978}\n`);
