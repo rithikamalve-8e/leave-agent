@@ -30,7 +30,12 @@ import {
   buildAlreadyProcessedCardContent,
   formatDisplayDate,
 } from "./app/cards";
- 
+
+import { 
+  startSchedulers, 
+  runStartupChecks, 
+  triggerMonthlySummaryNow 
+} from "./app/schedulers";
 const app = new App({ plugins: [new DevtoolsPlugin()] });
  
 // ── Incoming Messages ──────────────────────────────────────────────────────
@@ -352,8 +357,22 @@ app.on("install.add", async ({ send }) => {
 });
  
 // ── Start ──────────────────────────────────────────────────────────────────
- 
 (async () => {
   await app.start(+(process.env.PORT ?? 3978));
   console.log(`\nLeaveAgent running on port ${process.env.PORT ?? 3978}\n`);
+
+  // ── Startup checks ──────────────────────────────────────────────
+  runStartupChecks();
+
+  // ── Start all schedulers ────────────────────────────────────────
+  startSchedulers({
+    sendApproverReminder: async (month, year) => {
+      // TODO: implement when approver DM flow is built
+      console.log(`[TODO] Send approver reminder for ${month}/${year}`);
+    },
+    sendHRTakeover: async (month, year) => {
+      // TODO: implement when HR takeover flow is built
+      console.log(`[TODO] Send HR takeover for ${month}/${year}`);
+    },
+  });
 })();
