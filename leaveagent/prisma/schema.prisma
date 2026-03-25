@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Employee {
+  id                Int              @id @default(autoincrement())
+  name              String           @unique
+  email             String           @unique
+  role              String
+  bot_role          String           @default("employee")
+  manager           String?
+  manager_email     String?
+  manager_teams_id  String?
+  teamlead          String?
+  teamlead_email    String?
+  teamlead_teams_id String?
+  teams_id          String?          @unique
+  leave_balance     Float            @default(22)
+  created_at        DateTime         @default(now())
+  updated_at        DateTime
+  ConversationRef   ConversationRef?
+  LeaveRequest      LeaveRequest[]
+}
+
+model LeaveRequest {
+  id               Int       @id @default(autoincrement())
+  employee         String
+  email            String
+  type             String
+  date             String
+  end_date         String?
+  duration         String
+  days_count       Float     @default(1)
+  reason           String?
+  rejection_reason String?
+  status           String    @default("Pending")
+  approved_by      String?
+  deleted_by       String?
+  deleted_at       DateTime?
+  requested_at     DateTime  @default(now())
+  updated_at       DateTime
+  Employee         Employee  @relation(fields: [employee], references: [name])
+}
+
+model AuditLog {
+  id              Int      @id @default(autoincrement())
+  timestamp       DateTime @default(now())
+  hr_name         String
+  action          String
+  target_employee String?
+  details         String
+}
+
+model ConversationRef {
+  id             Int      @id @default(autoincrement())
+  userId         String   @unique
+  userName       String   @unique
+  conversationId String
+  serviceUrl     String
+  tenantId       String?
+  botId          String
+  isPersonal     Boolean  @default(false)
+  updatedAt      DateTime
+  Employee       Employee @relation(fields: [userName], references: [name])
+}
+
+model Holiday {
+  id       Int      @id @default(autoincrement())
+  date     String   @unique
+  name     String
+  added_by String
+  added_at DateTime @default(now())
+}
+
+model PendingRequest {
+  id           Int      @id @default(autoincrement())
+  userId       String   @unique
+  userName     String
+  intent       String
+  date         String
+  end_date     String?
+  duration     String
+  days_count   Float
+  reason       String?
+  balance_json String
+  history_json String
+  created_at   DateTime @default(now())
+  updated_at   DateTime
+}
