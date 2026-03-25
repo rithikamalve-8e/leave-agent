@@ -46,7 +46,7 @@ import {
   sendWorkforceCardToManager,
   sendHRAlert,
   NotificationContext,
-} from "./app/notificationService";
+} from "./app/notificationServices";
 
 import { getRoleContext }    from "./app/roleGuard";
 import { routeCommand }      from "./app/commandRouter";
@@ -478,8 +478,8 @@ async function submitRequest(
 
   startSchedulers({
     sendApproverReminder: async (month, year) => {
-      const { getMonthlyPendingRequests, getAllEmployees } = await import("./app/postgresManager");
-      const { sendApproverReminders }                     = await import("./app/notificationService");
+      const { getMonthlyPendingRequests, getAllEmployees } = await import("./app/postgresManager.js");
+      const { sendApproverReminders }                     = await import("./app/notificationServices.js");
       const records = await getMonthlyPendingRequests();
       const allEmps = await getAllEmployees();
       const label   = new Date(year, month - 1, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
@@ -496,8 +496,8 @@ async function submitRequest(
       await sendApproverReminders(Object.values(groups), label);
     },
     sendHRTakeover: async (month, year) => {
-      const { getMonthlyPendingRequests } = await import("./app/postgresManager");
-      const { sendHRTakeover }            = await import("./app/notificationService");
+      const { getMonthlyPendingRequests } = await import("./app/postgresManager.js");
+      const { sendHRTakeover }            = await import("./app/notificationServices.js");
       const records = await getMonthlyPendingRequests();
       const label   = new Date(year, month - 1, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
       await sendHRTakeover(records as any[], label);

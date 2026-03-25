@@ -41,9 +41,8 @@ import {
   sendDeleteNotifications,
   sendHolidayNotificationToAll,
   NotificationContext,
-} from "../notificationService";
+} from "../notificationServices";
 import { CommandContext } from "./sharedHandlers";
-import * as XLSX from "xlsx";
 import * as path from "path";
 import * as fs   from "fs";
 
@@ -208,7 +207,7 @@ export async function handleRejectAllUnactioned(
 export async function handleOrgSummary(ctx: CommandContext): Promise<void> {
   const today   = new Date().toISOString().split("T")[0];
   const records = await getAbsencesForDateRange(today, today);
-  const { buildDailySummaryCard } = await import("../cards");
+  const { buildDailySummaryCard } = await import("../cards.js");
   await ctx.send(buildDailySummaryCard(records as any[]));
 }
 
@@ -241,7 +240,7 @@ export async function handleHRBalance(ctx: CommandContext): Promise<void> {
   const pendingDays = allRecords.filter((r) => r.status === "Pending" && r.type !== "WFH").reduce((s, r) => s + r.days_count, 0);
   const balance     = await getLeaveBalance(name);
 
-  await ctx.send(buildLeaveBalanceCard(name, balance, pendingDays, employee.carry_forward));
+  await ctx.send(buildLeaveBalanceCard(name, balance, pendingDays, (employee as any).carry_forward));
 }
 
 // ── view employee [name] ───────────────────────────────────────────────────
@@ -734,7 +733,7 @@ export async function handleRemindApprovers(
     approverGroups[approverTeamsId].push({ approverName, approverTeamsId, record: r });
   }
 
-  const { sendApproverReminders } = await import("../notificationService");
+  const { sendApproverReminders } = await import("../notificationServices.js");
   const groups = Object.entries(approverGroups).map(([tid, items]) => ({
     approverName:    items[0].approverName,
     approverTeamsId: tid,
@@ -748,12 +747,12 @@ export async function handleRemindApprovers(
 // ── who is on leave [date/range] — full org ───────────────────────────────
 
 export async function handleHRWhoIsOnLeave(ctx: CommandContext): Promise<void> {
-  const { approverHandlers } = await import("./approverHandlers");
+  const { approverHandlers } = await import("./approveHandlers.js");
   // reuse approver handler but without team scoping
 }
 
 export async function handleHRWhoIsOnLeaveImpl(ctx: CommandContext): Promise<void> {
-  const { handleWhoIsOnLeave } = await import("./approverHandlers");
+  const { handleWhoIsOnLeave } = await import("./approveHandlers.js");
   // Call with scopeToTeam=false for HR
   const ctxWithOverride = { ...ctx, role: { ...ctx.role, botRole: "hr" as const } };
   await handleWhoIsOnLeave(ctxWithOverride, false);
