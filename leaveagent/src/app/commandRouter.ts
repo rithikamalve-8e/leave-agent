@@ -1,6 +1,6 @@
 import { RoleContext, getBotRole } from "./roleGuard";
 import { CommandContext } from "./handlers/sharedHandlers";
-import { NotificationContext } from "./notificationService";
+import { NotificationContext } from "./notificationServices";
 
 import {
   handleHelp,
@@ -27,7 +27,7 @@ import {
   handleBalanceForReportee,
   handleApproveLeaveCommand,
   handleRejectLeaveCommand,
-} from "./handlers/approverHandlers";
+} from "./handlers/approveHandlers";
 
 import {
   handleAllRequests,

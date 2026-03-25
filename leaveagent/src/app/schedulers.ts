@@ -8,7 +8,7 @@
  */
 
 import { getTodaysAbsences, getAllLeaveRequests, getAllEmployees } from "./postgresManager";
-import { sendDailySummaryRest } from "./notificationService";
+import { sendDailySummaryRest } from "./notificationServices";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 

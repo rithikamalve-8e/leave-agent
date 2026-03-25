@@ -16,8 +16,8 @@ import {
   getLeaveRequestsByEmployee,
   updateLeaveStatus,
   getLeaveBalance,
-} from "./postgresManager";
-import { sendStatusCardToEmployee, sendApprovalAnnouncement, sendWorkforceCardToManager, sendHRAlert, NotificationContext } from "../notificationService";
+} from "../postgresManager";
+import { sendStatusCardToEmployee, sendApprovalAnnouncement, sendWorkforceCardToManager, sendHRAlert, NotificationContext } from "../notificationServices";
 import { CommandContext } from "./sharedHandlers";
 
 // ── Parse date range from natural language ────────────────────────────────
