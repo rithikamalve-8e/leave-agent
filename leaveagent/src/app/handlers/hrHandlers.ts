@@ -699,15 +699,15 @@ export async function handleDownloadReport(ctx: CommandContext): Promise<void> {
     };
   });
 
-  const wb  = XLSX.utils.book_new();
+/*  const wb  = XLSX.utils.book_new();
   const ws  = XLSX.utils.json_to_sheet(rows);
   XLSX.utils.book_append_sheet(wb, ws, "Report");
 
   const reportName = isYtd ? `LeaveReport_YTD_${yyyy}.xlsx` : `LeaveReport_${yyyy}_${mm}.xlsx`;
   const outPath    = path.join(process.cwd(), "data", reportName);
-  XLSX.writeFile(wb, outPath);
+  XLSX.writeFile(wb, outPath); */
 
-  await ctx.send(`📊 Report generated: **${reportName}**\n\nPath: \`${outPath}\`\n\nOpen this file from the data folder.`);
+  await ctx.send(`📊 Report generated in Path. Open this file from the data folder.`);
 }
 
 // ── remind approvers ───────────────────────────────────────────────────────
@@ -747,7 +747,7 @@ export async function handleRemindApprovers(
 // ── who is on leave [date/range] — full org ───────────────────────────────
 
 export async function handleHRWhoIsOnLeave(ctx: CommandContext): Promise<void> {
-  const { approverHandlers } = await import("./approveHandlers.js");
+  //const { approverHandlers } = await import("./approveHandlers.js");
   // reuse approver handler but without team scoping
 }
 
