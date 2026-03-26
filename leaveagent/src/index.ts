@@ -78,7 +78,6 @@ app.on("message", async ({ activity, send, api }) => {
     serviceUrl:     activity.serviceUrl,
     tenantId:       activity.conversation.tenantId,
     botId:          activity.recipient?.id ?? "bot",
-    isPersonal:     activity.conversation.id.startsWith("a:"),
   });
 
   const nctx: NotificationContext = { api, botId: activity.recipient?.id ?? "" };
@@ -292,7 +291,7 @@ async function handleEditMode(ctx: CommandContext, existingPending: any, nctx: N
   const displayDate    = formatDisplayDate(intent.date);
   const displayEndDate = intent.end_date ? formatDisplayDate(intent.end_date) : null;
   const durationLabel  = intent.duration === "half_day" ? "Half Day" : intent.duration === "multi_day" ? "Multiple Days" : "Full Day";
-  const { workingDays: daysCount } = await countWorkingDays(intent.date, intent.end_date);
+  const daysCount = await countWorkingDays(intent.date, intent.end_date);
   const balanceResult  = await checkLeaveBalance(employee, daysCount, intent.intent, intent.date, intent.end_date);
 
   await savePendingRequest({
@@ -370,7 +369,7 @@ async function handleLeaveRequest(ctx: CommandContext, nctx: NotificationContext
   const displayDate    = formatDisplayDate(intent.date);
   const displayEndDate = intent.end_date ? formatDisplayDate(intent.end_date) : null;
   const durationLabel  = intent.duration === "half_day" ? "Half Day" : intent.duration === "multi_day" ? "Multiple Days" : "Full Day";
-  const { workingDays: daysCount } = await countWorkingDays(intent.date, intent.end_date);
+  const daysCount = await countWorkingDays(intent.date, intent.end_date);
   const balanceResult  = await checkLeaveBalance(employee, daysCount, intent.intent, intent.date, intent.end_date);
 
   if ((balanceResult as any).needsCarryForward) {
@@ -431,7 +430,7 @@ async function submitRequest(
   const displayEndDate = end_date ? formatDisplayDate(end_date) : null;
   const durationLabel  = duration === "half_day" ? "Half Day" : duration === "multi_day" ? "Multiple Days" : "Full Day";
   const isTeamLead     = employee.role === "teamlead";
-  const approverName    = isTeamLead ? employee.manager          : employee.teamlead;
+  const approverName   = isTeamLead ? employee.manager          : employee.teamlead;
   const approverTeamsId = isTeamLead ? employee.manager_teams_id : employee.teamlead_teams_id;
 
   await addLeaveRequest({
