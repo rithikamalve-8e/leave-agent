@@ -1,3 +1,4 @@
+import * as XLSX from "xlsx";
 import {
   buildAllRequestsCard,
   buildAuditLogCard,
@@ -699,13 +700,13 @@ export async function handleDownloadReport(ctx: CommandContext): Promise<void> {
     };
   });
 
-/*  const wb  = XLSX.utils.book_new();
+  const wb  = XLSX.utils.book_new();
   const ws  = XLSX.utils.json_to_sheet(rows);
   XLSX.utils.book_append_sheet(wb, ws, "Report");
 
   const reportName = isYtd ? `LeaveReport_YTD_${yyyy}.xlsx` : `LeaveReport_${yyyy}_${mm}.xlsx`;
   const outPath    = path.join(process.cwd(), "data", reportName);
-  XLSX.writeFile(wb, outPath); */
+  XLSX.writeFile(wb, outPath); 
 
   await ctx.send(`📊 Report generated in Path. Open this file from the data folder.`);
 }

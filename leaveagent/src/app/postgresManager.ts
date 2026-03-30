@@ -512,6 +512,8 @@ export async function getHolidays(month?: number, year?: number): Promise<Holida
 
   // Default: upcoming holidays from today
   const today = new Date().toISOString().split("T")[0];
+  console.log(`[getHolidays] no month/year — querying from today: ${today}`);
+
   return prisma.holiday.findMany({
     where:   { date: { gte: today } },
     orderBy: { date: "asc" },
