@@ -1,33 +1,41 @@
 import dotenv from "dotenv";
 dotenv.config({ path: "env/.env.local" });
- 
-import { App } from "@microsoft/teams.apps";
+dotenv.config({ path: ".env" });
+
+import { App }            from "@microsoft/teams.apps";
 import { DevtoolsPlugin } from "@microsoft/teams.dev";
 import { parseLeaveIntent } from "./app/groqParser";
+
 import {
   findEmployee,
   addLeaveRequest,
   updateLeaveStatus,
   isDuplicateRequest,
+  isOverlappingLeave,
   getTodaysAbsences,
-  getAllLeaveRequests,
-  LeaveRecord,
+  getLeaveRequestsByEmployee,
   saveConversationRef,
   getConversationRef,
   countWorkingDays,
   checkLeaveBalance,
-} from "./app/excelManager";
+  getHolidays,
+  isHoliday,
+  getLeaveBalance,
+  savePendingRequest,
+  getPendingRequest,
+  clearPendingRequest,
+} from "./app/postgresManager";
+
 import {
   buildApprovalCardContent,
   buildApprovedCardContent,
   buildRejectedCardContent,
   buildConfirmationCard,
   buildStatusCardContent,
-  buildDailySummaryCard,
-  buildAnnouncementCard,
-  buildHelpCard,
-  buildMyRequestsCard,
   buildAlreadyProcessedCardContent,
+  buildRejectionReasonPromptCard,
+  buildPreviewCard,
+  buildCancelledCard,
   formatDisplayDate,
 } from "./app/cards";
  
@@ -129,10 +137,10 @@ app.on("message", async ({ activity, send, api }) => {
   const userMessage = (activity.text ?? "").replace(/<[^>]+>/g, "").trim();
   const userId      = activity.from.id;
   const userName    = activity.from.name ?? "Employee";
- 
+
   console.log(`[LeaveAgent] "${userMessage}" from ${userName} (${userId})`);
- 
-  saveConversationRef(userId, {
+
+  await saveConversationRef({
     userId,
     userName,
     conversationId: activity.conversation.id,
@@ -220,23 +228,51 @@ app.on("message", async ({ activity, send, api }) => {
     await send(buildMyRequestsCard(userName, mine));
     return;
   }
- 
-  if (
-    cmd === "my balance"       ||
-    cmd === "leave balance"    ||
-    cmd === "my leave balance" ||
-    cmd === "balance"          ||
-    cmd.includes("how many leave")  ||
-    cmd.includes("leaves left")     ||
-    cmd.includes("leave balance")   ||
-    cmd.includes("how many days")   ||
-    cmd.includes("days remaining")  ||
-    cmd.includes("days left")
-  ) {
-    const employee = findEmployee(userName);
-    if (!employee) {
-      await send(`I couldn't find ${userName} in the employee directory. Please ask HR to add you.`);
-      return;
+
+  if (data.action === "preview_edit") {
+    const pending = await getPendingRequest(activity.from.id);
+    if (!pending) { await send("No pending request. Please start a new one."); return { statusCode: 200 } as any; }
+    pending.history = [
+      { role: "user",      content: `I want to request ${pending.intent} on ${pending.date}` },
+      { role: "assistant", content: "What would you like to change?" },
+    ];
+    await savePendingRequest(pending);
+    await send("What would you like to change?");
+    return { statusCode: 200, type: "application/vnd.microsoft.card.adaptive", value: buildAlreadyProcessedCardContent() as any } as any;
+  }
+
+  if (data.action === "preview_cancel") {
+    await clearPendingRequest(activity.from.id);
+    await send(buildCancelledCard());
+    return { statusCode: 200, type: "application/vnd.microsoft.card.adaptive", value: buildAlreadyProcessedCardContent() as any } as any;
+  }
+
+  // Approver actions
+  if (!data?.employeeName || !data?.date) {
+    return { statusCode: 200, type: "application/vnd.microsoft.card.adaptive", value: buildAlreadyProcessedCardContent() as any } as any;
+  }
+
+  const { action, employeeName, date, requestType = "WFH" } = data;
+  const displayDate = formatDisplayDate(date);
+
+  // Reject — show reason prompt card
+  if (action === "reject") {
+    return {
+      statusCode: 200,
+      type:       "application/vnd.microsoft.card.adaptive",
+      value:      buildRejectionReasonPromptCard(employeeName, date, requestType, displayDate) as any,
+    } as any;
+  }
+
+  // Confirm reject with reason
+  if (action === "confirm_reject") {
+    const reason  = data.rejectionReason || "No reason provided";
+    const updated = await updateLeaveStatus(employeeName, date, "Rejected", approverName, reason);
+    if (!updated) return { statusCode: 200, type: "application/vnd.microsoft.card.adaptive", value: buildAlreadyProcessedCardContent() as any } as any;
+
+    const employee = await findEmployee(employeeName);
+    if (employee?.teams_id) {
+      await sendStatusCardToEmployee(nctx, employee.teams_id, approverTeamsId, activity.conversation.id, requestType, displayDate, "Rejected", approverName, reason, send);
     }
     const allRequests = getAllLeaveRequests();
     const pendingDays = allRequests
@@ -281,21 +317,18 @@ app.on("message", async ({ activity, send, api }) => {
   console.log(`[LeaveAgent] Intent:`, JSON.stringify(intent));
  
   if (intent.needs_clarification || intent.intent === "UNKNOWN") {
-    await send(intent.clarification_question ?? "Could you rephrase? Try: 'WFH tomorrow', 'Sick today', or 'Leave from 20th to 25th'.");
+    existingPending.history.push(
+      { role: "user",      content: ctx.userMessage },
+      { role: "assistant", content: intent.clarification_question ?? "" }
+    );
+    await savePendingRequest(existingPending);
+    await ctx.send(intent.clarification_question ?? "Could you clarify?");
     return;
   }
- 
-  if (isDuplicateRequest(userName, intent.date)) {
-    await send(`You already have a request for ${formatDisplayDate(intent.date)}. Type 'my requests' to view it.`);
-    return;
-  }
- 
-  const employee = findEmployee(userName);
-  if (!employee) {
-    await send(`I couldn't find ${userName} in the employee directory. Please ask HR to add you.`);
-    return;
-  }
- 
+
+  const employee = await findEmployee(ctx.userName);
+  if (!employee) { await ctx.send("Employee not found. Please ask HR to add you."); return; }
+
   const displayDate    = formatDisplayDate(intent.date);
   const displayEndDate = intent.end_date ? formatDisplayDate(intent.end_date) : null;
   const durationLabel  = intent.duration === "half_day" ? "Half Day" : intent.duration === "multi_day" ? "Multiple Days" : "Full Day";
@@ -321,7 +354,7 @@ app.on("message", async ({ activity, send, api }) => {
     email:        employee.email,
     type:         intent.intent,
     date:         intent.date,
-    end_date:     intent.end_date ?? "",
+    end_date:     intent.end_date,
     duration:     intent.duration,
     days_count:   daysCount,
     reason:       intent.reason ?? "",
@@ -334,13 +367,13 @@ app.on("message", async ({ activity, send, api }) => {
   const approvalCardPayload = buildApprovalCardContent({
     employeeName:  userName,
     employeeEmail: employee.email,
-    requestType:   intent.intent,
-    date:          intent.date,
+    requestType:   intent,
+    date,
     displayDate,
     duration:      durationLabel,
     endDate:       displayEndDate,
-    daysCount,
-    reason:        intent.reason,
+    daysCount:     days_count,
+    reason,
     balanceResult,
   });
  
@@ -525,7 +558,7 @@ async function getBotToken(): Promise<string> {
 }
  
 // ── Start ──────────────────────────────────────────────────────────────────
- 
+
 (async () => {
   await app.start(+(process.env.PORT ?? 3978));
   console.log(`\nLeaveAgent running on port ${process.env.PORT ?? 3978}\n`);

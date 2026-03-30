@@ -6,7 +6,7 @@
     },
     "description": "Microsoft 365 Agents Toolkit AI Chat Agent Sample with Microsoft Teams SDK",
     "engines": {
-        "node": "20 || 22"
+        "node": ">=20"
     },
     "author": "Microsoft",
     "license": "MIT",
@@ -37,7 +37,6 @@
         "@prisma/client": "^7.5.0",
         "@types/nodemailer": "^7.0.11",
         "dotenv": "^16.4.5",
-        "groq-sdk": "^0.8.0",
         "nodemailer": "^8.0.2",
         "pg": "^8.20.0",
         "prisma": "^7.5.0",
@@ -48,6 +47,7 @@
         "@types/pg": "^8.18.0",
         "env-cmd": "^10.1.0",
         "nodemon": "^3.1.7",
+        "prisma": "^5.22.0",
         "shx": "^0.3.3",
         "ts-node": "^10.4.0",
         "typescript": "~5.8.3"
