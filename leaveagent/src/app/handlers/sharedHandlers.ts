@@ -39,6 +39,9 @@ export async function handleSummary(ctx: CommandContext): Promise<void> {
 // ── holidays ───────────────────────────────────────────────────────────────
 
 export async function handleHolidays(ctx: CommandContext): Promise<void> {
+
+  console.log(`[handleHolidays] cmd="${ctx.cmd}"`);
+  
   const monthNames = [
     "january","february","march","april","may","june",
     "july","august","september","october","november","december",
@@ -54,13 +57,28 @@ export async function handleHolidays(ctx: CommandContext): Promise<void> {
       month = i + 1;
       year  = new Date().getFullYear();
       monthLabel = monthNames[i].charAt(0).toUpperCase() + monthNames[i].slice(1) + ` ${year}`;
+      console.log(`[handleHolidays] matched month: ${monthLabel}`);
+
       break;
     }
   }
 
-  const holidays = await getHolidays(month, year);
-  await ctx.send(buildHolidaysCard(holidays as any[], monthLabel));
-}
+  if (!month) {
+    const today = new Date();
+    //month = today.getMonth() + 1;
+    year  = today.getFullYear();
+    //console.log(`[handleHolidays] no month in cmd — defaulting to current: month=${month}, year=${year}`);
+
+    monthLabel = undefined; // card will show "Upcoming Holidays"
+      }
+    console.log(`[handleHolidays] calling getHolidays(${month}, ${year})`);
+    const holidays = await getHolidays(year);
+    console.log(`[handleHolidays] got ${holidays.length} holidays back`);
+
+    const label = monthLabel ?? `${new Date().getFullYear()}`;  // "2026" if no month typed
+    console.log(`[handleHolidays] sending card with label="${label}"`);
+    await ctx.send(buildHolidaysCard(holidays as any[], label));
+  }
 
 // ── who is on leave today / who is wfh today ──────────────────────────────
 

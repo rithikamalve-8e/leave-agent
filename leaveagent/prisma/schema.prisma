@@ -1,60 +1,86 @@
 generator client {
   provider = "prisma-client-js"
 }
-
+ 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
-
+ 
+// ── Employees ──────────────────────────────────────────────────────────────
+ 
 model Employee {
-  id                Int              @id @default(autoincrement())
-  name              String           @unique
-  email             String           @unique
+  id                Int      @id @default(autoincrement())
+  name              String   @unique
+  email             String   @unique
   role              String
-  bot_role          String           @default("employee")
+  bot_role          String   @default("employee")
   manager           String?
   manager_email     String?
   manager_teams_id  String?
   teamlead          String?
   teamlead_email    String?
   teamlead_teams_id String?
-  teams_id          String?          @unique
-  leave_balance     Float            @default(22)
-  created_at        DateTime         @default(now())
-  updated_at        DateTime
-  ConversationRef   ConversationRef?
-  LeaveRequest      LeaveRequest[]
+  teams_id          String?  @unique
+  leave_balance     Float    @default(0)
+  year_entitlement_start  Int?
+  carry_forward     Float    @default(0)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+ 
+  leaveRequests    LeaveRequest[]   @relation("EmployeeLeave")
+  conversationRef  ConversationRef?
+  monthlySummaries MonthlySummary[] @relation("EmployeeSummary")
 }
-
+ 
+// ── Leave Requests ─────────────────────────────────────────────────────────
+ 
 model LeaveRequest {
   id               Int       @id @default(autoincrement())
   employee         String
   email            String
-  type             String
-  date             String
+  type             String    // WFH | LEAVE | SICK | MATERNITY | PATERNITY | ADOPTION | MARRIAGE
+  date             String    // YYYY-MM-DD start date
   end_date         String?
-  duration         String
+  duration         String    // full_day | half_day | multi_day
   days_count       Float     @default(1)
+  lop_days         Float     @default(0)   // ADDED: locked at submission time
   reason           String?
   rejection_reason String?
-  status           String    @default("Pending")
+  status           String    @default("Pending") // Pending | Approved | Rejected | Deleted
   approved_by      String?
   deleted_by       String?
   deleted_at       DateTime?
   requested_at     DateTime  @default(now())
-  updated_at       DateTime
-  Employee         Employee  @relation(fields: [employee], references: [name])
+  updated_at       DateTime  @updatedAt
+ 
+  employeeRef Employee @relation("EmployeeLeave", fields: [employee], references: [name])
 }
-
-model AuditLog {
-  id              Int      @id @default(autoincrement())
-  timestamp       DateTime @default(now())
-  hr_name         String
-  action          String
-  target_employee String?
-  details         String
+ 
+// ── Monthly Summary ────────────────────────────────────────────────────────
+// One row per employee per month
+// Built ONCE at end of month by scheduler — never updated after insert
+ 
+model MonthlySummary {
+  id         Int      @id @default(autoincrement())
+  month      String   // MM/YYYY e.g. "04/2026"
+  employee   String
+  opening    Float    @default(0)  // balance at START of month
+  available  Float    @default(0)  // opening + 1.5 (this month's accrual)
+  leaves     Float    @default(0)  // approved non-WFH days this month
+  wfh        Float    @default(0)  // approved WFH days this month
+  lop        Float    @default(0)  // loss of pay days this month
+  closing    Float    @default(0)  // available - leaves + lop
+  pending    Float    @default(0)  // snapshot of pending days at month end
+  created_at DateTime @default(now())
+ 
+  employeeRef Employee @relation("EmployeeSummary", fields: [employee], references: [name])
+ 
+  @@unique([month, employee]) // one row per employee per month
 }
-
+ 
+// ── Conversation Refs ──────────────────────────────────────────────────────
+ 
 model ConversationRef {
   id             Int      @id @default(autoincrement())
   userId         String   @unique
@@ -63,19 +89,34 @@ model ConversationRef {
   serviceUrl     String
   tenantId       String?
   botId          String
-  isPersonal     Boolean  @default(false)
-  updatedAt      DateTime
-  Employee       Employee @relation(fields: [userName], references: [name])
+  updatedAt      DateTime @updatedAt
+ 
+  employee Employee? @relation(fields: [userName], references: [name])
 }
-
+ 
+// ── Holidays ───────────────────────────────────────────────────────────────
+ 
 model Holiday {
   id       Int      @id @default(autoincrement())
-  date     String   @unique
+  date     String   @unique  // YYYY-MM-DD
   name     String
   added_by String
   added_at DateTime @default(now())
 }
-
+ 
+// ── Audit Log ──────────────────────────────────────────────────────────────
+ 
+model AuditLog {
+  id              Int      @id @default(autoincrement())
+  timestamp       DateTime @default(now())
+  hr_name         String
+  action          String   // balance_adjust | delete_request | add_holiday | add_leave_behalf
+  target_employee String?
+  details         String
+}
+ 
+// ── Pending Requests ───────────────────────────────────────────────────────
+ 
 model PendingRequest {
   id           Int      @id @default(autoincrement())
   userId       String   @unique
@@ -85,9 +126,10 @@ model PendingRequest {
   end_date     String?
   duration     String
   days_count   Float
+  lop_days     Float    @default(0)  // ADDED
   reason       String?
-  balance_json String
-  history_json String
+  balance_json String   // JSON stringified LeaveBalanceResult
+  history_json String   // JSON stringified ConversationMessage[]
   created_at   DateTime @default(now())
-  updated_at   DateTime
+  updated_at   DateTime @updatedAt
 }

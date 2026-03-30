@@ -586,6 +586,7 @@ export async function saveConversationRef(input: ConversationRefInput): Promise<
     where: { userId: input.userId },
   });
 
+  console.log("USER NAME RAW:", JSON.stringify(input.userName));
   const existingIsPersonal = existing?.conversationId?.startsWith("a:") ?? false;
   const newIsPersonal      = input.conversationId.startsWith("a:");
 
@@ -697,15 +698,22 @@ export async function addHoliday(date: string, name: string, addedBy: string): P
 }
 
 export async function getHolidays(month?: number, year?: number): Promise<Holiday[]> {
-  if (month !== undefined && year !== undefined) {
-    const mm    = String(month).padStart(2, "0");
-    const yyyy  = String(year);
-    return prisma.holiday.findMany({
-      where:   { date: { gte: `${yyyy}-${mm}-01`, lte: `${yyyy}-${mm}-31` } },
-      orderBy: { date: "asc" },
-    });
-  }
+  console.log(`[getHolidays] called with month=${month}, year=${year}`);
+
+
+  // if (month !== undefined || year !== undefined) {
+  //   const mm    = String(month).padStart(2, "0");
+  //   const yyyy  = String(year);
+  //   console.log(`[getHolidays] querying range: ${yyyy}-${mm}-01 → ${yyyy}-${12}-31`);
+
+  //   return prisma.holiday.findMany({
+  //     where:   { date: { gte: `${yyyy}-${mm}-01`, lte: `${yyyy}-${12}-31` } },
+  //     orderBy: { date: "asc" },
+  //   });
+  // }
   const today = new Date().toISOString().split("T")[0];
+  console.log(`[getHolidays] no month/year — querying from today: ${today}`);
+
   return prisma.holiday.findMany({
     where:   { date: { gte: today } },
     orderBy: { date: "asc" },

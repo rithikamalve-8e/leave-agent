@@ -85,12 +85,20 @@ app.on("message", async ({ activity, send, api }) => {
   // ── Intercept card button clicks misrouted as messages ───────────────────
   const activityValue = (activity as any).value;
   if (activityValue?.action) {
-    const handled = await handleCardAction(activityValue, userName, userId, activity, send, api, nctx);
-    if (handled) return;
+    console.log("[FLOW] CARD ACTION FLOW triggered");
+    const normalizedData = activityValue?.action?.data ?? activityValue;
+    const handled = await handleCardAction(normalizedData, userName, userId, activity, send, api, nctx);
+    console.log("[FLOW] handleCardAction returned:", handled);
+    if (handled) {
+          console.log("[FLOW] Card handled → STOP");
+      return;
+    }
+    console.log("[FLOW] Card NOT handled → FALLBACK to text flow ❌");
+
   }
 
   // ── Role + Command Router ─────────────────────────────────────────────────
-  const role = getRoleContext(userName);
+  const role = await getRoleContext(userName);
   const cmd  = userMessage.toLowerCase();
   const ctx: CommandContext = { activity, send, api, userName, userId, userMessage, cmd, role };
 
@@ -224,9 +232,45 @@ async function handleCardAction(
   data: any, userName: string, userId: string,
   activity: any, send: Function, api: any, nctx: NotificationContext
 ): Promise<boolean> {
-  if (data.action !== "approve" && data.action !== "reject" && data.action !== "confirm_reject") return false;
+
+
+  console.log("------ CARD ACTION START ------");
+  console.log("[CARD] Full payload:", JSON.stringify(data));
+  console.log("[CARD] action:", data.action);
 
   const { action, employeeName, date, requestType = "WFH" } = data;
+
+
+  if (action === "preview_confirm") {
+  await submitRequest(userId, userName, activity, send, api, nctx);
+  return true;
+  }
+if (action === "preview_edit") {
+  const pending = await getPendingRequest(userId);
+  if (!pending) { await send("No pending request. Please start a new one."); return true; }
+  pending.history = [
+    { role: "user",      content: `I want to request ${pending.intent} on ${pending.date}` },
+    { role: "assistant", content: "What would you like to change?" },
+  ];
+  await savePendingRequest(pending);
+  await send("What would you like to change?");
+  return true;
+}
+if (action === "preview_cancel") {
+  await clearPendingRequest(userId);
+  await send(buildCancelledCard());
+  return true;
+}
+
+
+
+  if (action !== "approve" && action !== "reject" && action !== "confirm_reject") return false;
+
+if (!employeeName || !date) {
+  await send("Invalid request data.");
+  return true;
+}
+
   const displayDate = formatDisplayDate(date);
 
   if (action === "reject") {
@@ -320,6 +364,13 @@ async function handleEditMode(ctx: CommandContext, existingPending: any, nctx: N
   }));
 }
 
+// Clear any stale pending before saving new one
+/*await clearPendingRequest(ctx: CommandContext);
+ 
+await savePendingRequest({
+  userId:       ctx.userId,
+  ...
+});*/
 async function handleLeaveRequest(ctx: CommandContext, nctx: NotificationContext): Promise<void> {
   const onBehalfMatch = ctx.userMessage.match(/(?:leave|wfh|sick).*\bfor\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/);
   if (onBehalfMatch && onBehalfMatch[1].toLowerCase() !== ctx.userName.toLowerCase() && !ctx.role.isHR) {
