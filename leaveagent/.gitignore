@@ -23,4 +23,3 @@ lib/
 # Dev tool directories
 /devTools/
 /generated/prisma
-../node_modules/
