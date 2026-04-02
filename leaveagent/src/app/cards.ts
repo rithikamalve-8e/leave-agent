@@ -1,4 +1,5 @@
 import { IAdaptiveCard } from "@microsoft/teams.cards";
+import { title } from "process";
 
 // ── Shared Types ───────────────────────────────────────────────────────────
 
@@ -75,16 +76,7 @@ export function getTypeLabel(type: string): string {
 }
 
 export function getTypeEmoji(type: string): string {
-  switch (type?.toUpperCase()) {
-    case "WFH":       return "🏠";
-    case "LEAVE":     return "🌴";
-    case "SICK":      return "🤒";
-    case "MATERNITY": return "👶";
-    case "PATERNITY": return "👨‍👶";
-    case "MARRIAGE":  return "💍";
-    case "ADOPTION":  return "🏠";
-    default:          return "📋";
-  }
+  return "";
 }
 
 function wrap(content: object): CardActivity {
@@ -114,7 +106,7 @@ export function buildConfirmationCard(
 ): CardActivity {
   const facts: any[] = [
     { title: "Employee",     value: employeeName },
-    { title: "Type",         value: `${getTypeEmoji(requestType)} ${getTypeLabel(requestType)}` },
+    { title: "Type",         value: getTypeLabel(requestType) },
     { title: "Date",         value: displayDate },
   ];
   if (endDate)   facts.push({ title: "End Date",     value: endDate });
@@ -126,12 +118,12 @@ export function buildConfirmationCard(
     facts.push({ title: "Granted",       value: `${balanceResult.granted} day(s)` });
     facts.push({ title: "Loss of Pay",   value: `${balanceResult.lop} day(s) — contact HR` });
   }
-  facts.push({ title: "Status", value: "⏳ Awaiting approval" });
+  facts.push({ title: "Status", value: "Awaiting approval" });
 
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "✅ Request Submitted", weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "TextBlock", text: "Request Submitted", weight: "Bolder", size: "Large", color: "Accent" },
       { type: "FactSet", facts },
       { type: "TextBlock", text: "Your approver has been notified and will review shortly.", wrap: true, color: "Good", size: "Small" },
     ],
@@ -140,15 +132,19 @@ export function buildConfirmationCard(
 
 export function buildStatusCardContent(
   requestType:      string,
-  displayDate:      string,
   status:           "Approved" | "Rejected",
   byName:           string,
+  displayDate:      string,
+  endDate?:         string,
+  duration?:        string,
   rejectionReason?: string
 ): IAdaptiveCard {
   const isApproved = status === "Approved";
   const facts: any[] = [
-    { title: "Type",     value: `${getTypeEmoji(requestType)} ${getTypeLabel(requestType)}` },
+    { title: "Type",     value: getTypeLabel(requestType) },
     { title: "Date",     value: displayDate },
+    ...(endDate?  [{ title: "End Date", value: endDate }]: []),
+    ...(duration? [{title: "Duration", value: duration}]: []),
     { title: "Decision", value: `${status} by ${byName}` },
   ];
   if (!isApproved && rejectionReason) {
@@ -159,7 +155,7 @@ export function buildStatusCardContent(
     body: [
       {
         type: "TextBlock",
-        text: isApproved ? "✅ Your request was Approved" : "❌ Your request was Rejected",
+        text: isApproved ? "Your request was Approved" : "Your request was Rejected",
         weight: "Bolder", size: "Large",
         color: isApproved ? "Good" : "Attention",
       },
@@ -183,7 +179,7 @@ export function buildMyRequestsCard(userName: string, records: LeaveRecord[]): C
     return wrap({
       $schema: SCHEMA, type: "AdaptiveCard", version: VER,
       body: [
-        { type: "TextBlock", text: "📋 My Leave Requests", weight: "Bolder", size: "Large", color: "Accent" },
+        { type: "TextBlock", text: "My Leave Requests", weight: "Bolder", size: "Large", color: "Accent" },
         { type: "TextBlock", text: "No leave requests found. Submit one by saying 'WFH tomorrow' or 'Sick today'.", wrap: true, color: "Good" },
       ],
     });
@@ -195,7 +191,7 @@ export function buildMyRequestsCard(userName: string, records: LeaveRecord[]): C
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: `📋 ${userName} — Leave Requests`, weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "TextBlock", text: `${userName} — Leave Requests`, weight: "Bolder", size: "Large", color: "Accent" },
       ...records.map((r) => ({
         type: "ColumnSet",
         separator: true,
@@ -203,9 +199,9 @@ export function buildMyRequestsCard(userName: string, records: LeaveRecord[]): C
           {
             type: "Column", width: "stretch",
             items: [
-              { type: "TextBlock", text: `${getTypeEmoji(r.type)} ${getTypeLabel(r.type)}`, weight: "Bolder", size: "Small" },
+              { type: "TextBlock", text: getTypeLabel(r.type), weight: "Bolder", size: "Small" },
               { type: "TextBlock", text: formatDisplayDate(r.date), size: "Small", isSubtle: true, wrap: true },
-              ...(r.end_date ? [{ type: "TextBlock", text: `→ ${formatDisplayDate(r.end_date)}`, size: "Small", isSubtle: true }] : []),
+              ...(r.end_date ? [{ type: "TextBlock", text: `-> ${formatDisplayDate(r.end_date)}`, size: "Small", isSubtle: true }] : []),
             ],
           },
           {
@@ -241,17 +237,17 @@ export function buildLeaveBalanceCard(
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: `🏖️ Leave Balance — ${userName}`, weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "TextBlock", text: `Leave Balance — ${userName}`, weight: "Bolder", size: "Large", color: "Accent" },
       { type: "FactSet", facts },
-      { type: "TextBlock", text: "💡 WFH does not consume leave balance. LEAVE and SICK are deducted from your annual balance.", wrap: true, size: "Small", isSubtle: true },
-      { type: "TextBlock", text: available <= 3 ? "⚠️ Low balance — contact HR for assistance." : "✅ Balance looks good.", wrap: true, size: "Small", color },
+      { type: "TextBlock", text: "WFH does not consume leave balance. LEAVE and SICK are deducted from your annual balance.", wrap: true, size: "Small", isSubtle: true },
+      { type: "TextBlock", text: available <= 3 ? "Low balance — contact HR for assistance." : "Balance looks good.", wrap: true, size: "Small", color },
     ],
   });
 }
 
 export function buildMyStatusCard(record: LeaveRecord): CardActivity {
   const facts: any[] = [
-    { title: "Type",     value: `${getTypeEmoji(record.type)} ${getTypeLabel(record.type)}` },
+    { title: "Type",     value: getTypeLabel(record.type) },
     { title: "Date",     value: formatDisplayDate(record.date) },
   ];
   if (record.end_date) facts.push({ title: "End Date", value: formatDisplayDate(record.end_date) });
@@ -266,7 +262,7 @@ export function buildMyStatusCard(record: LeaveRecord): CardActivity {
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "📋 Request Status", weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "TextBlock", text: "Request Status", weight: "Bolder", size: "Large", color: "Accent" },
       { type: "FactSet", facts },
       { type: "TextBlock", text: `Status: ${record.status}`, weight: "Bolder", color, size: "Small" },
     ],
@@ -277,7 +273,7 @@ export function buildHolidaysCard(
   holidays: { date: string; name: string }[],
   month?:   string
 ): CardActivity {
-  const title = month ? `🎉 Holidays — ${month}` : "🎉 Upcoming Holidays";
+  const title = month ? `Holidays — ${month}` : "Upcoming Holidays";
 
   if (holidays.length === 0) {
     return wrap({
@@ -308,7 +304,7 @@ function buildEmployeeHelpCard(): CardActivity {
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "🤖 LeaveAgent — Employee Commands", weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "TextBlock", text: "LeaveAgent — Employee Commands", weight: "Bolder", size: "Large", color: "Accent" },
       { type: "TextBlock", text: "Leave Requests", weight: "Bolder", size: "Medium", separator: true },
       { type: "FactSet", facts: [
         { title: "WFH tomorrow",           value: "Work from home request" },
@@ -341,7 +337,7 @@ function buildApproverHelpCard(): CardActivity {
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "🤖 LeaveAgent — Approver Commands", weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "TextBlock", text: "LeaveAgent — Approver Commands", weight: "Bolder", size: "Large", color: "Accent" },
       { type: "TextBlock", text: "Team Management", weight: "Bolder", size: "Medium", separator: true },
       { type: "FactSet", facts: [
         { title: "team summary",               value: "Team availability today" },
@@ -366,6 +362,32 @@ function buildApproverHelpCard(): CardActivity {
         { title: "summary",                             value: "Today's availability" },
       ]},
       { type: "TextBlock", text: "You can also submit your own leave requests normally.", wrap: true, size: "Small", isSubtle: true, separator: true },
+      { type: "TextBlock", text: "LeaveAgent — Employee Commands", weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "TextBlock", text: "Leave Requests", weight: "Bolder", size: "Medium", separator: true },
+      { type: "FactSet", facts: [
+        { title: "WFH tomorrow",           value: "Work from home request" },
+        { title: "Sick today",             value: "Sick leave" },
+        { title: "Leave on Friday",        value: "Planned leave" },
+        { title: "Leave from 20th to 25th",value: "Multi-day leave" },
+      ]},
+      { type: "TextBlock", text: "My Info", weight: "Bolder", size: "Medium", separator: true },
+      { type: "FactSet", facts: [
+        { title: "my requests",      value: "Last 5 requests" },
+        { title: "my requests all",  value: "Full request history" },
+        { title: "my balance",       value: "Leave balance" },
+        { title: "my status [date]", value: "Status of a specific request" },
+      ]},
+      { type: "TextBlock", text: "General", weight: "Bolder", size: "Medium", separator: true },
+      { type: "FactSet", facts: [
+        { title: "summary",               value: "Today's workforce availability" },
+        { title: "holidays",              value: "Upcoming holidays" },
+        { title: "holidays [month]",      value: "Holidays for a specific month" },
+        { title: "who is on leave today", value: "See who is out today" },
+        { title: "who is wfh today",      value: "See who is WFH today" },
+        { title: "delete request [date]", value: "Delete your pending request" },
+        { title: "edit request [date]",   value: "Edit your pending request" },
+      ]},
+    
     ],
   });
 }
@@ -374,7 +396,7 @@ function buildHRHelpCard(): CardActivity {
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "🤖 LeaveAgent — HR Commands", weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "TextBlock", text: "LeaveAgent — HR Commands", weight: "Bolder", size: "Large", color: "Accent" },
       { type: "TextBlock", text: "Queries", weight: "Bolder", size: "Medium", separator: true },
       { type: "FactSet", facts: [
         { title: "all requests",               value: "All leave requests org-wide" },
@@ -420,11 +442,13 @@ function buildHRHelpCard(): CardActivity {
       ]},
       { type: "TextBlock", text: "Holidays", weight: "Bolder", size: "Medium", separator: true },
       { type: "FactSet", facts: [
-        { title: "add holiday [date] [name]",           value: "Add a company holiday" },
+        { title: "add holiday [date] [name]",           value: "Add a company holiday in format yyyy-mm-dd" },
         { title: "edit holiday [date] [new name]",      value: "Edit holiday name" },
-        { title: "reschedule holiday [name] to [date]", value: "Move holiday to new date" },
+        { title: "reschedule holiday [name] to [date]", value: "Move holiday to new date yyyy-mm-dd" },
         { title: "delete holiday [date]",               value: "Remove a holiday" },
-        { title: "holidays",                            value: "List upcoming holidays" },
+        { title: "holidays",                            value: "List upcoming holidays in format (yyyy-mm-dd | name)" },
+        { title: "add multiple holidays", value: "Bulk upload holidays" },
+        { title: "clear all holidays", value: "Delete all holidays" },
       ]},
       { type: "TextBlock", text: "Reports", weight: "Bolder", size: "Medium", separator: true },
       { type: "FactSet", facts: [
@@ -441,7 +465,7 @@ export function buildApprovalCardContent(data: ApprovalCardData): IAdaptiveCard 
   const facts: any[] = [
     { title: "Employee",     value: data.employeeName },
     { title: "Email",        value: data.employeeEmail },
-    { title: "Type",         value: `${getTypeEmoji(data.requestType)} ${getTypeLabel(data.requestType)}` },
+    { title: "Type",         value: getTypeLabel(data.requestType) },
     { title: "Date",         value: data.displayDate },
     ...(data.endDate   ? [{ title: "End Date",     value: data.endDate }]              : []),
     ...(data.daysCount ? [{ title: "Working Days", value: `${data.daysCount} day(s)` }] : []),
@@ -458,17 +482,17 @@ export function buildApprovalCardContent(data: ApprovalCardData): IAdaptiveCard 
   return {
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "⏳ Leave Approval Required", weight: "Bolder", size: "Large", color: "Warning" },
+      { type: "TextBlock", text: "Leave Approval Required", weight: "Bolder", size: "Large", color: "Warning" },
       { type: "FactSet", facts },
       { type: "TextBlock", text: "Please approve or reject this request.", wrap: true, size: "Small" },
     ],
     actions: [
       {
-        type: "Action.Submit", title: "✅ Approve", style: "positive",
+        type: "Action.Submit", title: "Approve", style: "positive",
         data: { action: "approve", employeeName: data.employeeName, date: data.date, requestType: data.requestType },
       },
       {
-        type: "Action.Submit", title: "❌ Reject", style: "destructive",
+        type: "Action.Submit", title: "Reject", style: "destructive",
         data: { action: "reject", employeeName: data.employeeName, date: data.date, requestType: data.requestType },
       },
     ],
@@ -479,10 +503,10 @@ export function buildApprovedCardContent(data: SimpleCardData, approvedBy: strin
   return {
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "✅ Request Approved", weight: "Bolder", size: "Large", color: "Good" },
+      { type: "TextBlock", text: "Request Approved", weight: "Bolder", size: "Large", color: "Good" },
       { type: "FactSet", facts: [
         { title: "Employee",    value: data.employeeName },
-        { title: "Type",        value: `${getTypeEmoji(data.requestType)} ${getTypeLabel(data.requestType)}` },
+        { title: "Type",        value: getTypeLabel(data.requestType) },
         { title: "Date",        value: data.displayDate },
         { title: "Approved By", value: approvedBy },
         { title: "Time",        value: new Date().toLocaleTimeString("en-IN") },
@@ -498,7 +522,7 @@ export function buildRejectedCardContent(
 ): IAdaptiveCard {
   const facts: any[] = [
     { title: "Employee",    value: data.employeeName },
-    { title: "Type",        value: `${getTypeEmoji(data.requestType)} ${getTypeLabel(data.requestType)}` },
+    { title: "Type",        value: getTypeLabel(data.requestType) },
     { title: "Date",        value: data.displayDate },
     { title: "Rejected By", value: rejectedBy },
     { title: "Time",        value: new Date().toLocaleTimeString("en-IN") },
@@ -508,7 +532,7 @@ export function buildRejectedCardContent(
   return {
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "❌ Request Rejected", weight: "Bolder", size: "Large", color: "Attention" },
+      { type: "TextBlock", text: "Request Rejected", weight: "Bolder", size: "Large", color: "Attention" },
       { type: "FactSet", facts },
     ],
   };
@@ -523,7 +547,7 @@ export function buildRejectionReasonPromptCard(
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "❌ Rejecting Request", weight: "Bolder", size: "Large", color: "Attention" },
+      { type: "TextBlock", text: "Rejecting Request", weight: "Bolder", size: "Large", color: "Attention" },
       { type: "FactSet", facts: [
         { title: "Employee", value: employeeName },
         { title: "Type",     value: getTypeLabel(requestType) },
@@ -554,7 +578,7 @@ export function buildTeamRequestsCard(
   records:      LeaveRecord[],
   title?:       string
 ): CardActivity {
-  const heading = title ?? `👥 Team Requests — ${approverName}`;
+  const heading = title ?? `Team Requests — ${approverName}`;
 
   if (records.length === 0) {
     return wrap({
@@ -580,7 +604,7 @@ export function buildTeamRequestsCard(
           {
             type: "Column", width: "stretch",
             items: [
-              { type: "TextBlock", text: `${getTypeEmoji(r.type)} ${r.employee}`, weight: "Bolder", size: "Small" },
+              { type: "TextBlock", text: r.employee, weight: "Bolder", size: "Small" },
               { type: "TextBlock", text: `${getTypeLabel(r.type)} · ${formatDisplayDate(r.date)}`, size: "Small", isSubtle: true, wrap: true },
             ],
           },
@@ -605,8 +629,8 @@ export function buildPendingApprovalsCard(
     return wrap({
       $schema: SCHEMA, type: "AdaptiveCard", version: VER,
       body: [
-        { type: "TextBlock", text: "⏳ Pending Approvals", weight: "Bolder", size: "Large", color: "Accent" },
-        { type: "TextBlock", text: "No pending requests. You're all caught up! 🎉", wrap: true, color: "Good" },
+        { type: "TextBlock", text: "Pending Approvals", weight: "Bolder", size: "Large", color: "Accent" },
+        { type: "TextBlock", text: "No pending requests. You're all caught up!", wrap: true, color: "Good" },
       ],
     });
   }
@@ -614,14 +638,14 @@ export function buildPendingApprovalsCard(
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: `⏳ Pending Approvals — ${approverName}`, weight: "Bolder", size: "Large", color: "Warning" },
+      { type: "TextBlock", text: `Pending Approvals — ${approverName}`, weight: "Bolder", size: "Large", color: "Warning" },
       { type: "TextBlock", text: `${records.length} request(s) awaiting your action`, size: "Small", color: "Warning" },
       ...records.map((r) => ({
         type: "ColumnSet", separator: true,
         columns: [{
           type: "Column", width: "stretch",
           items: [
-            { type: "TextBlock", text: `${getTypeEmoji(r.type)} ${r.employee}`, weight: "Bolder", size: "Small" },
+            { type: "TextBlock", text: r.employee, weight: "Bolder", size: "Small" },
             { type: "TextBlock", text: `${getTypeLabel(r.type)} · ${formatDisplayDate(r.date)}`, size: "Small", isSubtle: true, wrap: true },
             { type: "TextBlock", text: `${r.days_count} day(s)`, size: "Small", isSubtle: true },
           ],
@@ -638,15 +662,15 @@ export function buildWhoIsOnLeaveCard(
   type?:     "leave" | "wfh" | "all"
 ): CardActivity {
   const typeTitle =
-    type === "wfh"   ? "🏠 WFH" :
-    type === "leave" ? "🌴 On Leave" : "📋 Absent";
+    type === "wfh"   ? "WFH" :
+    type === "leave" ? "On Leave" : "Absent";
 
   if (records.length === 0) {
     return wrap({
       $schema: SCHEMA, type: "AdaptiveCard", version: VER,
       body: [
         { type: "TextBlock", text: `${typeTitle} — ${dateLabel}`, weight: "Bolder", size: "Large", color: "Accent" },
-        { type: "TextBlock", text: "Everyone is available! 🎉", wrap: true, color: "Good" },
+        { type: "TextBlock", text: "Everyone is available!", wrap: true, color: "Good" },
       ],
     });
   }
@@ -658,7 +682,7 @@ export function buildWhoIsOnLeaveCard(
       { type: "TextBlock", text: `${records.length} person(s)`, size: "Small", isSubtle: true },
       { type: "FactSet", facts: records.map((r) => ({
         title: r.employee,
-        value: `${getTypeEmoji(r.type)} ${getTypeLabel(r.type)} · ${r.days_count} day(s)`,
+        value: `${getTypeLabel(r.type)} · ${r.days_count} day(s)`,
       }))},
     ],
   });
@@ -672,13 +696,13 @@ export function buildApproverReminderCard(
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "⚠️ Month-End Reminder", weight: "Bolder", size: "Large", color: "Warning" },
+      { type: "TextBlock", text: "Month-End Reminder", weight: "Bolder", size: "Large", color: "Warning" },
       { type: "TextBlock", text: `Hi ${approverName}, the following requests from ${month} are still pending:`, wrap: true },
       { type: "FactSet", facts: records.map((r) => ({
         title: r.employee,
         value: `${getTypeLabel(r.type)} on ${formatDisplayDate(r.date)}`,
       }))},
-      { type: "TextBlock", text: "⏰ Please action these by end of day — unactioned requests will be escalated to HR.", wrap: true, color: "Attention", size: "Small" },
+      { type: "TextBlock", text: "Please action these by end of day — unactioned requests will be escalated to HR.", wrap: true, color: "Attention", size: "Small" },
     ],
   });
 }
@@ -693,12 +717,12 @@ export function buildHRAlertCard(
   actionBy?:    string,
   reason?:      string
 ): CardActivity {
-  const titles = { submitted: "📬 New Leave Request", approved: "✅ Request Approved", rejected: "❌ Request Rejected" };
+  const titles = { submitted: "New Leave Request", approved: "Request Approved", rejected: "Request Rejected" };
   const colors = { submitted: "Accent", approved: "Good", rejected: "Attention" };
 
   const facts: any[] = [
     { title: "Employee", value: employeeName },
-    { title: "Type",     value: `${getTypeEmoji(requestType)} ${getTypeLabel(requestType)}` },
+    { title: "Type",     value: getTypeLabel(requestType) },
     { title: "Date",     value: displayDate },
   ];
   if (actionBy) facts.push({ title: event === "submitted" ? "Requested By" : "Actioned By", value: actionBy });
@@ -717,7 +741,7 @@ export function buildHRTakeoverCard(records: LeaveRecord[], month: string): Card
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "🚨 Unactioned Requests — HR Escalation", weight: "Bolder", size: "Large", color: "Attention" },
+      { type: "TextBlock", text: "Unactioned Requests — HR Escalation", weight: "Bolder", size: "Large", color: "Attention" },
       { type: "TextBlock", text: `The following ${month} requests were not actioned by their approvers:`, wrap: true },
       { type: "FactSet", facts: records.map((r) => ({
         title: r.employee,
@@ -729,7 +753,7 @@ export function buildHRTakeoverCard(records: LeaveRecord[], month: string): Card
 }
 
 export function buildAllRequestsCard(records: LeaveRecord[], title?: string): CardActivity {
-  const heading = title ?? "📋 All Leave Requests";
+  const heading = title ?? "All Leave Requests";
 
   if (records.length === 0) {
     return wrap({
@@ -747,7 +771,7 @@ export function buildAllRequestsCard(records: LeaveRecord[], title?: string): Ca
       { type: "TextBlock", text: `${label} (${items.length})`, weight: "Bolder", size: "Small", separator: true },
       { type: "FactSet", facts: items.map((r) => ({
         title: `${r.employee} · ${formatDisplayDate(r.date)}`,
-        value: `${getTypeEmoji(r.type)} ${getTypeLabel(r.type)} · ${r.days_count} day(s)`,
+        value: `${getTypeLabel(r.type)} · ${r.days_count} day(s)`,
       }))},
     ];
   };
@@ -757,10 +781,10 @@ export function buildAllRequestsCard(records: LeaveRecord[], title?: string): Ca
     body: [
       { type: "TextBlock", text: heading, weight: "Bolder", size: "Large", color: "Accent" },
       { type: "TextBlock", text: `Total: ${records.length}`, size: "Small", isSubtle: true },
-      ...buildSection(records.filter((r) => r.status === "Pending"),  "⏳ Pending"),
-      ...buildSection(records.filter((r) => r.status === "Approved"), "✅ Approved"),
-      ...buildSection(records.filter((r) => r.status === "Rejected"), "❌ Rejected"),
-      ...buildSection(records.filter((r) => r.status === "Deleted"),  "🗑️ Deleted"),
+      ...buildSection(records.filter((r) => r.status === "Pending"),  "Pending"),
+      ...buildSection(records.filter((r) => r.status === "Approved"), "Approved"),
+      ...buildSection(records.filter((r) => r.status === "Rejected"), "Rejected"),
+      ...buildSection(records.filter((r) => r.status === "Deleted"),  "Deleted"),
     ],
   });
 }
@@ -769,7 +793,7 @@ export function buildAuditLogCard(
   entries:    { timestamp: Date; hr_name: string; action: string; target_employee: string | null; details: string }[],
   dateRange?: string
 ): CardActivity {
-  const title = dateRange ? `🔍 Audit Log — ${dateRange}` : "🔍 Audit Log — Last 50 Actions";
+  const title = dateRange ? `Audit Log — ${dateRange}` : "Audit Log — Last 50 Actions";
 
   if (entries.length === 0) {
     return wrap({
@@ -781,13 +805,6 @@ export function buildAuditLogCard(
     });
   }
 
-  const actionEmoji = (a: string) =>
-    a === "balance_adjust"   ? "💰" :
-    a === "delete_request"   ? "🗑️" :
-    a === "add_holiday"      ? "🎉" :
-    a === "add_leave_behalf" ? "📝" :
-    a === "restore_request"  ? "♻️" : "📋";
-
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
@@ -798,7 +815,7 @@ export function buildAuditLogCard(
         columns: [{
           type: "Column", width: "stretch",
           items: [
-            { type: "TextBlock", text: `${actionEmoji(e.action)} ${e.hr_name} — ${e.action.replace(/_/g, " ")}`, weight: "Bolder", size: "Small" },
+            { type: "TextBlock", text: `${e.hr_name} — ${e.action.replace(/_/g, " ")}`, weight: "Bolder", size: "Small" },
             { type: "TextBlock", text: e.details, size: "Small", isSubtle: true, wrap: true },
             { type: "TextBlock", text: new Date(e.timestamp).toLocaleString("en-IN"), size: "Small", isSubtle: true },
           ],
@@ -825,12 +842,12 @@ export function buildEmployeeProfileCard(emp: {
   if (emp.carry_forward !== undefined) facts.push({ title: "Carry Forward", value: `${emp.carry_forward} day(s)` });
   if (emp.manager)                     facts.push({ title: "Manager",       value: emp.manager });
   if (emp.teamlead)                    facts.push({ title: "Team Lead",     value: emp.teamlead });
-  facts.push({ title: "Teams ID", value: emp.teams_id ? "✅ Registered" : "❌ Not registered" });
+  facts.push({ title: "Teams ID", value: emp.teams_id ? "Registered" : "Not registered" });
 
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: `👤 ${emp.name}`, weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "TextBlock", text: emp.name, weight: "Bolder", size: "Large", color: "Accent" },
       { type: "FactSet", facts },
     ],
   });
@@ -846,7 +863,7 @@ export function buildBalanceAdjustedCard(
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "💰 Leave Balance Updated", weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "TextBlock", text: "Leave Balance Updated", weight: "Bolder", size: "Large", color: "Accent" },
       { type: "FactSet", facts: [
         { title: "Employee",    value: employeeName },
         { title: "Adjustment",  value: `${adjustment > 0 ? "+" : ""}${adjustment} day(s)` },
@@ -869,7 +886,7 @@ export function buildDeletedNotificationCard(
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "🗑️ Leave Request Deleted", weight: "Bolder", size: "Large", color: "Attention" },
+      { type: "TextBlock", text: "Leave Request Deleted", weight: "Bolder", size: "Large", color: "Attention" },
       { type: "FactSet", facts: [
         { title: "Employee",   value: employeeName },
         { title: "Type",       value: getTypeLabel(requestType) },
@@ -889,10 +906,10 @@ export function buildHolidayAnnouncementCard(
   action:  "added" | "edited" | "rescheduled" | "deleted" = "added"
 ): CardActivity {
   const titles = {
-    added:       "🎉 New Holiday Added",
-    edited:      "✏️ Holiday Updated",
-    rescheduled: "📅 Holiday Rescheduled",
-    deleted:     "🗑️ Holiday Removed",
+    added:       "New Holiday Added",
+    edited:      "Holiday Updated",
+    rescheduled: "Holiday Rescheduled",
+    deleted:     "Holiday Removed",
   };
 
   return wrap({
@@ -904,7 +921,7 @@ export function buildHolidayAnnouncementCard(
         { title: "Date",     value: formatDisplayDate(date) },
         { title: "Added By", value: addedBy },
       ]},
-      { type: "TextBlock", text: "Mark your calendars! 🗓️", wrap: true, size: "Small", color: "Good" },
+      { type: "TextBlock", text: "Mark your calendars!", wrap: true, size: "Small", color: "Good" },
     ],
   });
 }
@@ -916,7 +933,7 @@ export function buildUnregisteredCard(
     return wrap({
       $schema: SCHEMA, type: "AdaptiveCard", version: VER,
       body: [
-        { type: "TextBlock", text: "✅ All Employees Registered", weight: "Bolder", size: "Large", color: "Good" },
+        { type: "TextBlock", text: "All Employees Registered", weight: "Bolder", size: "Large", color: "Good" },
         { type: "TextBlock", text: "Everyone has messaged the bot and is registered.", wrap: true },
       ],
     });
@@ -925,7 +942,7 @@ export function buildUnregisteredCard(
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "⚠️ Unregistered Employees", weight: "Bolder", size: "Large", color: "Warning" },
+      { type: "TextBlock", text: "Unregistered Employees", weight: "Bolder", size: "Large", color: "Warning" },
       { type: "TextBlock", text: `${employees.length} employee(s) have not yet messaged the bot.`, wrap: true },
       { type: "FactSet", facts: employees.map((e) => ({ title: e.name, value: `${e.email} · ${e.role}` })) },
       { type: "TextBlock", text: "Ask them to open LeaveAgent in Teams and send any message.", wrap: true, size: "Small", isSubtle: true, separator: true },
@@ -939,11 +956,11 @@ export function buildOrgChartCard(
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "🏢 Org Chart", weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "TextBlock", text: "Org Chart", weight: "Bolder", size: "Large", color: "Accent" },
       ...approvers.map((a) => ({
         type: "Container", separator: true,
         items: [
-          { type: "TextBlock", text: `👤 ${a.name}`, weight: "Bolder", size: "Small" },
+          { type: "TextBlock", text: a.name, weight: "Bolder", size: "Small" },
           {
             type: "TextBlock",
             text: a.reportees.length > 0
@@ -958,14 +975,14 @@ export function buildOrgChartCard(
 }
 
 export function buildUnactionedCard(records: LeaveRecord[], forHR = false): CardActivity {
-  const title = forHR ? "🚨 Unactioned Requests This Month" : "⏳ Your Unactioned Requests";
+  const title = forHR ? "Unactioned Requests This Month" : "Your Unactioned Requests";
 
   if (records.length === 0) {
     return wrap({
       $schema: SCHEMA, type: "AdaptiveCard", version: VER,
       body: [
         { type: "TextBlock", text: title, weight: "Bolder", size: "Large", color: "Good" },
-        { type: "TextBlock", text: "No unactioned requests this month. 🎉", wrap: true },
+        { type: "TextBlock", text: "No unactioned requests this month.", wrap: true },
       ],
     });
   }
@@ -1010,20 +1027,20 @@ export function buildDailySummaryCard(records: LeaveRecord[]): CardActivity {
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "📋 Daily Workforce Summary", weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "TextBlock", text: "Daily Workforce Summary", weight: "Bolder", size: "Large", color: "Accent" },
       { type: "TextBlock", text: today, size: "Small", isSubtle: true },
       {
         type: "ColumnSet",
         columns: [
-          { type: "Column", width: "stretch", items: [{ type: "TextBlock", text: `🏠 WFH (${wfh.length})`, weight: "Bolder" }, { type: "TextBlock", text: toList(wfh), wrap: true, size: "Small" }] },
-          { type: "Column", width: "stretch", items: [{ type: "TextBlock", text: `🌴 Leave (${leave.length})`, weight: "Bolder" }, { type: "TextBlock", text: toList(leave), wrap: true, size: "Small" }] },
-          { type: "Column", width: "stretch", items: [{ type: "TextBlock", text: `🤒 Sick (${sick.length})`, weight: "Bolder" }, { type: "TextBlock", text: toList(sick), wrap: true, size: "Small" }] },
+          { type: "Column", width: "stretch", items: [{ type: "TextBlock", text: `WFH (${wfh.length})`, weight: "Bolder" }, { type: "TextBlock", text: toList(wfh), wrap: true, size: "Small" }] },
+          { type: "Column", width: "stretch", items: [{ type: "TextBlock", text: `Leave (${leave.length})`, weight: "Bolder" }, { type: "TextBlock", text: toList(leave), wrap: true, size: "Small" }] },
+          { type: "Column", width: "stretch", items: [{ type: "TextBlock", text: `Sick (${sick.length})`, weight: "Bolder" }, { type: "TextBlock", text: toList(sick), wrap: true, size: "Small" }] },
         ],
       },
       ...(other.length > 0 ? [{ type: "TextBlock", text: `Other: ${other.map((r) => r.employee).join(", ")}`, size: "Small", isSubtle: true }] : []),
       {
         type: "TextBlock",
-        text: records.length === 0 ? "✅ Everyone is available today." : `Total absent: ${records.length}`,
+        text: records.length === 0 ? "Everyone is available today." : `Total absent: ${records.length}`,
         size: "Small", isSubtle: true,
         color: records.length > 0 ? "Warning" : "Good",
       },
@@ -1040,7 +1057,7 @@ export interface PreviewCardData {
 export function buildPreviewCard(data: PreviewCardData): CardActivity {
   const facts: any[] = [
     { title: "Employee",     value: data.employeeName },
-    { title: "Type",         value: `${getTypeEmoji(data.requestType)} ${getTypeLabel(data.requestType)}` },
+    { title: "Type",         value: getTypeLabel(data.requestType) },
     { title: "Date",         value: data.displayDate },
   ];
   if (data.endDate)   facts.push({ title: "End Date",     value: data.endDate });
@@ -1051,14 +1068,14 @@ export function buildPreviewCard(data: PreviewCardData): CardActivity {
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "📋 Review Your Request", weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "TextBlock", text: "Review Your Request", weight: "Bolder", size: "Large", color: "Accent" },
       { type: "FactSet", facts },
       { type: "TextBlock", text: "Please confirm or edit before sending to your approver.", wrap: true, size: "Small", isSubtle: true },
     ],
     actions: [
-      { type: "Action.Submit", title: "✅ Confirm & Send", style: "positive", data: { action: "preview_confirm" } },
-      { type: "Action.Submit", title: "✏️ Edit",                                data: { action: "preview_edit"    } },
-      { type: "Action.Submit", title: "❌ Cancel",          style: "destructive", data: { action: "preview_cancel"  } },
+      { type: "Action.Submit", title: "Confirm & Send", style: "positive", data: { action: "preview_confirm" } },
+      { type: "Action.Submit", title: "Edit",                               data: { action: "preview_edit"    } },
+      { type: "Action.Submit", title: "Cancel",          style: "destructive", data: { action: "preview_cancel"  } },
     ],
   });
 }
@@ -1067,7 +1084,7 @@ export function buildCancelledCard(): CardActivity {
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "❌ Request Cancelled", weight: "Bolder", size: "Large", color: "Attention" },
+      { type: "TextBlock", text: "Request Cancelled", weight: "Bolder", size: "Large", color: "Attention" },
       { type: "TextBlock", text: "Your request was cancelled. Nothing was submitted.", wrap: true },
     ],
   });
@@ -1088,7 +1105,7 @@ export function buildAnnouncementCard(record: {
 }): CardActivity {
   const facts: any[] = [
     { title: "Employee",    value: record.employee },
-    { title: "Type",        value: `${getTypeEmoji(record.type)} ${getTypeLabel(record.type)}` },
+    { title: "Type",        value: getTypeLabel(record.type) },
     { title: "Date",        value: formatDisplayDate(record.date) },
   ];
   if (record.end_date)    facts.push({ title: "End Date",    value: formatDisplayDate(record.end_date) });
@@ -1099,7 +1116,7 @@ export function buildAnnouncementCard(record: {
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "📅 Workforce Availability Update", weight: "Bolder", size: "Large", color: "Accent" },
+      { type: "TextBlock", text: "Workforce Availability Update", weight: "Bolder", size: "Large", color: "Accent" },
       { type: "FactSet", facts },
     ],
   });
@@ -1109,7 +1126,7 @@ export function buildAlreadyProcessedCardContent(): IAdaptiveCard {
   return {
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "⚠️ Already Processed", weight: "Bolder", color: "Warning" },
+      { type: "TextBlock", text: "Already Processed", weight: "Bolder", color: "Warning" },
       { type: "TextBlock", text: "This request has already been processed.", wrap: true, size: "Small" },
     ],
   };
@@ -1119,7 +1136,7 @@ export function buildErrorCard(message: string): CardActivity {
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: "❌ Error", weight: "Bolder", size: "Large", color: "Attention" },
+      { type: "TextBlock", text: "Error", weight: "Bolder", size: "Large", color: "Attention" },
       { type: "TextBlock", text: message, wrap: true },
     ],
   });
@@ -1129,7 +1146,7 @@ export function buildSuccessCard(title: string, message: string): CardActivity {
   return wrap({
     $schema: SCHEMA, type: "AdaptiveCard", version: VER,
     body: [
-      { type: "TextBlock", text: `✅ ${title}`, weight: "Bolder", size: "Large", color: "Good" },
+      { type: "TextBlock", text: title, weight: "Bolder", size: "Large", color: "Good" },
       { type: "TextBlock", text: message, wrap: true },
     ],
   });

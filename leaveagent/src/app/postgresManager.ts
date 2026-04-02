@@ -52,9 +52,10 @@ export interface PendingRequestInput {
   end_date?:     string;
   duration:      string;
   days_count:    number;
-  lop_days?:     number;   // ADDED
+  lop_days?:     number;   
   reason?:       string;
   balanceResult: LeaveBalanceResult;
+  previewCardActivityId?: string | null;
   history:       Array<{ role: "user" | "assistant"; content: string }>;
 }
 
@@ -350,15 +351,40 @@ export async function deleteLeaveRequest(
   return updated;
 }
 
-export async function isDuplicateRequest(employeeName: string, date: string): Promise<boolean> {
-  const exact = await prisma.leaveRequest.findFirst({
+export async function isDuplicateRequest(employeeName: string, date: string, duration: string): Promise<boolean> {
+    const sameSlot = await prisma.leaveRequest.findFirst({
     where: {
       employee: { equals: employeeName, mode: "insensitive" },
       date,
-      status:   { in: ["Pending", "Approved"] },
+      duration,
+      status: { in: ["Pending", "Approved"] },
     },
   });
-  if (exact) return true;
+
+  if (sameSlot) return true;
+
+    const fullDay = await prisma.leaveRequest.findFirst({
+    where: {
+      employee: { equals: employeeName, mode: "insensitive" },
+      date,
+      duration: "full_day",
+      status: { in: ["Pending", "Approved"] },
+    },
+  });
+
+  if (fullDay) return true;
+
+    if (duration === "full_day") {
+    const any = await prisma.leaveRequest.findFirst({
+      where: {
+        employee: { equals: employeeName, mode: "insensitive" },
+        date,
+        status: { in: ["Pending", "Approved"] },
+      },
+    });
+
+    if (any) return true;
+  }
 
   const multiDay = await prisma.leaveRequest.findMany({
     where: {
@@ -674,6 +700,28 @@ export async function getPendingRequest(userId: string): Promise<PendingRequestI
   };
 }
 
+export async function getLeaveRequestStatus(
+  employeeName: string,
+  date: string
+): Promise<{ status: "Pending" | "Approved" | "Rejected" } | null> {
+
+  const record = await prisma.leaveRequest.findFirst({
+    where: {
+      employee: employeeName,
+      date: date,
+    },
+    select: {
+      status: true,
+    },
+  });
+
+  if (!record) return null;
+
+  return {
+    status: record.status as "Pending" | "Approved" | "Rejected",
+  };
+}
+
 export async function clearPendingRequest(userId: string): Promise<void> {
   await prisma.pendingRequest.deleteMany({ where: { userId } });
 }
@@ -723,6 +771,19 @@ export async function getHolidays(month?: number, year?: number): Promise<Holida
 
 export async function isHoliday(date: string): Promise<boolean> {
   return !!(await prisma.holiday.findUnique({ where: { date } }));
+}
+
+export async function clearAllHolidays(clearedBy: string): Promise<number> {
+  const result = await prisma.holiday.deleteMany({});
+
+  await appendAuditLog({
+    hr_name:         clearedBy,
+    action:          "clear_holidays",
+    target_employee: null,
+    details:         `Cleared all holidays (${result.count} records deleted)`,
+  });
+
+  return result.count;
 }
 
 // ── Audit Log ──────────────────────────────────────────────────────────────

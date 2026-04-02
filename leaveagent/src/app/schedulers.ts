@@ -59,7 +59,7 @@ function scheduleDailySummary(): void {
   function scheduleNext(): void {
     const now     = new Date();
     const next9am = new Date(now);
-    next9am.setHours(9, 0, 0, 0);
+    next9am.setHours(9, 51, 0, 0);
     if (now >= next9am) next9am.setDate(next9am.getDate() + 1);
 
     const ms = msUntil(next9am);

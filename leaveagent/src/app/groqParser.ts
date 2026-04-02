@@ -14,7 +14,11 @@ export type LeaveIntent =
   | "MARRIAGE"
   | "UNKNOWN";
  
-export type LeaveDuration = "full_day" | "half_day" | "multi_day";
+export type LeaveDuration =
+  | "full_day"
+  | "morning"
+  | "afternoon"
+  | "multi_day";
  
 export interface ParsedLeaveIntent {
   intent: LeaveIntent;
@@ -252,13 +256,17 @@ CHECK 6 — MARRIAGE 42-DAY NOTICE
 ═══════════════════════════════
 DURATION RULES
 ═══════════════════════════════
-- Default (no qualifier)                           → "full_day"
-- "half day", "half-day", "morning", "afternoon"   → "half_day"
-- "for a few hours", "quick", "2 hours"            → "half_day"
-- "from X to Y", "through", multiple days, "next week" → "multi_day"
+- Default (no qualifier)               → "full_day"
+- "morning", "first half"             → "morning"
+- "afternoon", "second half"          → "afternoon"
+- "half day" (no slot specified)      → needs_clarification: true
+- "from X to Y", multiple days        → "multi_day"
 - MATERNITY, PATERNITY, ADOPTION, MARRIAGE         → always "multi_day"
  
-For multi_day: ALWAYS populate BOTH date AND end_date.
+Important:
+- NEVER return "half_day"
+- Always return "morning" or "afternoon"
+- For multi_day: ALWAYS populate BOTH date AND end_date.
  
 ═══════════════════════════════
 REASON FIELD
@@ -281,7 +289,7 @@ EDGE CASES
 - "sick for a couple of days" → SICK, multi_day, needs_clarification if start date missing
 - "I want Friday off" → LEAVE, upcoming Friday, full_day
 - "need to step out early today" → SICK or WFH, half_day, needs_clarification: true
- 
+- "half day leave" or "half day wfh"→ needs_clarification: true → clarification_question: "Do you want morning or afternoon?"
 ═══════════════════════════════
 SECURITY RULES  (highest priority)
 ═══════════════════════════════
@@ -301,7 +309,7 @@ Respond ONLY with a single valid JSON object. No markdown. No code fences. No ex
 Required always:
   "intent":              "WFH"|"LEAVE"|"SICK"|"MATERNITY"|"PATERNITY"|"ADOPTION"|"MARRIAGE"|"UNKNOWN"
   "date":                "YYYY-MM-DD" | ""
-  "duration":            "full_day" | "half_day" | "multi_day"
+  "duration"duration":   "full_day" | "morning" | "afternoon" | "multi_day"":            "full_day" | "half_day" | "multi_day"
   "needs_clarification": true | false
   "confidence":          0.0-1.0
  
@@ -352,6 +360,16 @@ Output: {"intent":"PATERNITY","date":"2026-03-16","end_date":"2026-03-20","durat
 Input: "marriage leave from April 10th" (today is ${today}, only 29 days away)
 Output: {"intent":"MARRIAGE","date":"2026-04-10","end_date":"2026-04-14","duration":"multi_day","needs_clarification":true,"clarification_question":"Policy requires marriage leave to be requested at least 6 weeks in advance. HR will review and confirm.","confidence":0.9}
  
+Input: "leave tomorrow morning"
+Output:
+{"intent":"LEAVE","date":"${tomorrow}","duration":"morning","needs_clarification":false,"confidence":1.0}
+
+Input: "wfh tomorrow afternoon"
+Output: {"intent":"WFH","date":"${tomorrow}","duration":"afternoon","needs_clarification":false,"confidence":1.0}
+
+Input: "half day leave tomorrow"
+Output: {"intent":"LEAVE","date":"${tomorrow}","duration":"full_day","needs_clarification":true,"clarification_question":"Do you want morning or afternoon?","confidence":0.8}
+
 [AMBIGUOUS]
  
 Input: "I'll be late tomorrow"
@@ -361,7 +379,7 @@ Input: "not coming in"
 Output: {"intent":"UNKNOWN","date":"","duration":"full_day","needs_clarification":true,"clarification_question":"Are you taking leave or planning to WFH? And which date?","confidence":0.3}
  
 Input: "doctor appointment at 2pm tomorrow"
-Output: {"intent":"SICK","date":"${tomorrow}","duration":"half_day","reason":"doctor appointment at 2pm","needs_clarification":false,"confidence":0.9}
+Output: {"intent":"SICK","date":"${tomorrow}","duration":"afternoon","reason":"doctor appointment at 2pm","needs_clarification":false,"confidence":0.9}
  
 Input: "leave for the holidays"
 Output: {"intent":"LEAVE","date":"","duration":"multi_day","needs_clarification":true,"clarification_question":"Sure! Which dates would you like to take leave for?","confidence":0.5}

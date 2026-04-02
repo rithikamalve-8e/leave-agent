@@ -40,12 +40,8 @@
                     ],
                     "commands": [
                         {
-                            "title": "How can you help me?",
-                            "description": "How can you help me?"
-                        },
-                        {
-                            "title": "How to develop agent for Teams?",
-                            "description": "How can I develop agents with Microsoft 365 Agents Toolkit?"
+                            "title": "help",
+                            "description": "Helping Commands"
                         }
                     ]
                 }

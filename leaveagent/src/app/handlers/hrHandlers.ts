@@ -33,6 +33,7 @@ import {
   getLeaveBalance,
   appendAuditLog,
   upsertEmployee,
+  clearAllHolidays,
 } from "../postgresManager";
 import {
   sendStatusCardToEmployee,
@@ -44,35 +45,72 @@ import {
   NotificationContext,
 } from "../notificationServices";
 import { CommandContext } from "./sharedHandlers";
+import { handleWhoIsOnLeave } from "./approveHandlers";
 import * as path from "path";
 import * as fs   from "fs";
+
+// ── Shared month/date helpers ──────────────────────────────────────────────
+
+const MONTH_NAMES = [
+  "january","february","march","april","may","june",
+  "july","august","september","october","november","december",
+];
+
+/**
+ * Returns { mm: "01"–"12", name: "January" } if a month name is found in
+ * the lowercased command string, otherwise null.
+ */
+function extractMonth(cmd: string): { mm: string; name: string } | null {
+  const lower = cmd.toLowerCase();
+  for (let i = 0; i < MONTH_NAMES.length; i++) {
+    if (lower.includes(MONTH_NAMES[i])) {
+      return {
+        mm:   String(i + 1).padStart(2, "0"),
+        name: MONTH_NAMES[i].charAt(0).toUpperCase() + MONTH_NAMES[i].slice(1),
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Parses a YYYY-MM-DD date from the message, or returns today's date.
+ */
+function extractDate(cmd: string): string {
+  const m = cmd.match(/(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : new Date().toISOString().split("T")[0];
+}
 
 // ── all requests ───────────────────────────────────────────────────────────
 
 export async function handleAllRequests(ctx: CommandContext): Promise<void> {
-  const monthNames = ["january","february","march","april","may","june","july","august","september","october","november","december"];
   let records = await getAllLeaveRequests();
 
-  // filter by month name
-  for (let i = 0; i < monthNames.length; i++) {
-    if (ctx.cmd.includes(monthNames[i])) {
-      const mm = String(i + 1).padStart(2, "0");
-      const yy = String(new Date().getFullYear());
-      records   = records.filter((r) => r.date.startsWith(`${yy}-${mm}`));
-      break;
+  // Filter by month name if present
+  const monthInfo = extractMonth(ctx.cmd);
+  if (monthInfo) {
+    const yy = String(new Date().getFullYear());
+    records   = records.filter((r) => r.date.startsWith(`${yy}-${monthInfo.mm}`));
+  }
+
+  // Filter by employee name: "all requests Rithika MR"
+  // Strip leading command words to isolate the name portion
+  const nameMatch = ctx.userMessage.match(/all\s+requests\s+(.+)/i);
+  if (nameMatch) {
+    const rest    = nameMatch[1].trim();
+    const isMonth = extractMonth(rest) !== null;
+    if (rest && !isMonth) {
+      records = records.filter((r) =>
+        r.employee.toLowerCase().includes(rest.toLowerCase())
+      );
     }
   }
 
-  // filter by employee name: "all requests Rithika MR"
-  const parts = ctx.userMessage.split(/\s+/);
-  const idx   = parts.findIndex((p) => /requests/i.test(p)) + 1;
-  const rest  = parts.slice(idx).join(" ").trim();
-  const isMonth = monthNames.some((m) => rest.toLowerCase().includes(m));
-  if (rest && !isMonth) {
-    records = records.filter((r) => r.employee.toLowerCase().includes(rest.toLowerCase()));
-  }
+  const label = monthInfo
+    ? `All Requests — ${monthInfo.name}`
+    : "All Requests";
 
-  await ctx.send(buildAllRequestsCard(records as any[], `📋 All Requests${rest && !isMonth ? ` — ${rest}` : ""}`));
+  await ctx.send(buildAllRequestsCard(records as any[], label));
 }
 
 // ── pending ────────────────────────────────────────────────────────────────
@@ -81,13 +119,17 @@ export async function handleAllPending(ctx: CommandContext): Promise<void> {
   let records = await getAllLeaveRequests();
   records = records.filter((r) => r.status === "Pending");
 
-  // optionally filter by employee name
-  const parts = ctx.userMessage.split(/\s+/);
-  const idx   = parts.findIndex((p) => /pending/i.test(p)) + 1;
-  const name  = parts.slice(idx).join(" ").trim();
-  if (name) records = records.filter((r) => r.employee.toLowerCase().includes(name.toLowerCase()));
+  // Optionally filter by employee name: "pending Rithika"
+  const nameMatch = ctx.userMessage.match(/pending\s+(.+)/i);
+  if (nameMatch) {
+    const name = nameMatch[1].trim();
+    records = records.filter((r) =>
+      r.employee.toLowerCase().includes(name.toLowerCase())
+    );
+  }
 
-  await ctx.send(buildAllRequestsCard(records as any[], `⏳ Pending Requests${name ? ` — ${name}` : ""}`));
+  const nameStr = nameMatch ? ` — ${nameMatch[1].trim()}` : "";
+  await ctx.send(buildAllRequestsCard(records as any[], `Pending Requests${nameStr}`));
 }
 
 // ── unactioned ─────────────────────────────────────────────────────────────
@@ -134,9 +176,8 @@ export async function handleApproveUnactionedForEmployee(
   ctx:  CommandContext,
   nctx: NotificationContext
 ): Promise<void> {
-  const parts   = ctx.userMessage.split(/\s+/);
-  const nameIdx = parts.findIndex((p) => /unactioned/i.test(p)) + 1;
-  const name    = parts.slice(nameIdx).join(" ").trim();
+  const nameMatch = ctx.userMessage.match(/approve\s+unactioned\s+(.+)/i);
+  const name      = nameMatch ? nameMatch[1].trim() : "";
 
   if (!name) {
     await ctx.send(buildErrorCard("Usage: `approve unactioned [employee name]`"));
@@ -176,7 +217,7 @@ export async function handleRejectAllUnactioned(
   ctx:  CommandContext,
   nctx: NotificationContext
 ): Promise<void> {
-  const match  = ctx.userMessage.match(/reject all unactioned\s+(.+)/i);
+  const match  = ctx.userMessage.match(/reject\s+all\s+unactioned\s+(.+)/i);
   const reason = match ? match[1].trim() : "Not actioned by approver — HR decision";
 
   const records = await getMonthlyPendingRequests();
@@ -203,11 +244,12 @@ export async function handleRejectAllUnactioned(
   await ctx.send(buildSuccessCard("Bulk Rejected", `${rejected} request(s) rejected. Reason: ${reason}`));
 }
 
-// ── org summary ────────────────────────────────────────────────────────────
+// ── org summary [date?] ────────────────────────────────────────────────────
 
 export async function handleOrgSummary(ctx: CommandContext): Promise<void> {
-  const today   = new Date().toISOString().split("T")[0];
-  const records = await getAbsencesForDateRange(today, today);
+  // Supports: "org summary", "org summary today", "org summary 2026-04-10"
+  const date    = extractDate(ctx.cmd);
+  const records = await getAbsencesForDateRange(date, date);
   const { buildDailySummaryCard } = await import("../cards.js");
   await ctx.send(buildDailySummaryCard(records as any[]));
 }
@@ -215,9 +257,8 @@ export async function handleOrgSummary(ctx: CommandContext): Promise<void> {
 // ── leave history [name] ───────────────────────────────────────────────────
 
 export async function handleHRLeaveHistory(ctx: CommandContext): Promise<void> {
-  const parts   = ctx.userMessage.split(/\s+/);
-  const nameIdx = parts.findIndex((p) => /history/i.test(p)) + 1;
-  const name    = parts.slice(nameIdx).join(" ").trim();
+  const nameMatch = ctx.userMessage.match(/leave\s+history\s+(.+)/i);
+  const name      = nameMatch ? nameMatch[1].trim() : "";
 
   if (!name) { await ctx.send(buildErrorCard("Usage: `leave history [name]`")); return; }
 
@@ -228,9 +269,8 @@ export async function handleHRLeaveHistory(ctx: CommandContext): Promise<void> {
 // ── balance [name] ─────────────────────────────────────────────────────────
 
 export async function handleHRBalance(ctx: CommandContext): Promise<void> {
-  const parts   = ctx.userMessage.split(/\s+/);
-  const nameIdx = parts.findIndex((p) => /^balance$/i.test(p)) + 1;
-  const name    = parts.slice(nameIdx).join(" ").trim();
+  const nameMatch = ctx.userMessage.match(/^balance\s+(.+)/i);
+  const name      = nameMatch ? nameMatch[1].trim() : "";
 
   if (!name) { await ctx.send(buildErrorCard("Usage: `balance [employee name]`")); return; }
 
@@ -238,8 +278,10 @@ export async function handleHRBalance(ctx: CommandContext): Promise<void> {
   if (!employee) { await ctx.send(buildErrorCard(`Employee ${name} not found.`)); return; }
 
   const allRecords  = await getLeaveRequestsByEmployee(name);
-  const pendingDays = allRecords.filter((r) => r.status === "Pending" && r.type !== "WFH").reduce((s, r) => s + r.days_count, 0);
-  const balance     = await getLeaveBalance(name);
+  const pendingDays = allRecords
+    .filter((r) => r.status === "Pending" && r.type !== "WFH")
+    .reduce((s, r) => s + r.days_count, 0);
+  const balance = await getLeaveBalance(name);
 
   await ctx.send(buildLeaveBalanceCard(name, balance, pendingDays, (employee as any).carry_forward));
 }
@@ -247,9 +289,8 @@ export async function handleHRBalance(ctx: CommandContext): Promise<void> {
 // ── view employee [name] ───────────────────────────────────────────────────
 
 export async function handleViewEmployee(ctx: CommandContext): Promise<void> {
-  const parts   = ctx.userMessage.split(/\s+/);
-  const nameIdx = parts.findIndex((p) => /employee/i.test(p)) + 1;
-  const name    = parts.slice(nameIdx).join(" ").trim();
+  const nameMatch = ctx.userMessage.match(/view\s+employee\s+(.+)/i);
+  const name      = nameMatch ? nameMatch[1].trim() : "";
 
   if (!name) { await ctx.send(buildErrorCard("Usage: `view employee [name]`")); return; }
 
@@ -285,14 +326,15 @@ export async function handleOrgChart(ctx: CommandContext): Promise<void> {
 // ── team [approver name] ───────────────────────────────────────────────────
 
 export async function handleTeamOf(ctx: CommandContext): Promise<void> {
-  const parts   = ctx.userMessage.split(/\s+/);
-  const nameIdx = parts.findIndex((p) => /^team$/i.test(p)) + 1;
-  const name    = parts.slice(nameIdx).join(" ").trim();
+  const nameMatch = ctx.userMessage.match(/^team\s+(.+)/i);
+  const name      = nameMatch ? nameMatch[1].trim() : "";
 
   if (!name) { await ctx.send(buildErrorCard("Usage: `team [approver name]`")); return; }
 
   const all       = await getAllEmployees();
-  const reportees = all.filter((e) => e.teamlead === name || e.manager === name).map((e) => e.name);
+  const reportees = all
+    .filter((e) => e.teamlead === name || e.manager === name)
+    .map((e) => e.name);
 
   if (reportees.length === 0) {
     await ctx.send(buildErrorCard(`No reportees found for ${name}.`));
@@ -328,9 +370,12 @@ export async function handleAdjustBalance(
   ctx:  CommandContext,
   nctx: NotificationContext
 ): Promise<void> {
-  const match = ctx.userMessage.match(/adjust balance\s+(.+?)\s+([+-]?\d+(?:\.\d+)?)\s+(.+)/i);
+  const match = ctx.userMessage.match(/adjust\s+balance\s+(.+?)\s+([+-]?\d+(?:\.\d+)?)\s+(.+)/i);
   if (!match) {
-    await ctx.send(buildErrorCard("Usage: `adjust balance [name] [+/-days] [reason]`\nExample: `adjust balance Rithika MR +3 carry forward`"));
+    await ctx.send(buildErrorCard(
+      "Usage: `adjust balance [name] [+/-days] [reason]`\n" +
+      "Example: `adjust balance Rithika MR +3 carry forward`"
+    ));
     return;
   }
 
@@ -341,9 +386,12 @@ export async function handleAdjustBalance(
   if (!employee) { await ctx.send(buildErrorCard(`Employee ${name} not found.`)); return; }
 
   const updated = await adjustLeaveBalance(name, days, reason, ctx.userName);
-  if (!updated) { await ctx.send(buildErrorCard(`Could not update balance for ${name}.`)); return; }
+  if (!updated)  { await ctx.send(buildErrorCard(`Could not update balance for ${name}.`)); return; }
 
-  await ctx.send(buildSuccessCard("Balance Updated", `${name}'s balance adjusted by ${days > 0 ? "+" : ""}${days} days. New balance: ${updated.leave_balance} days. Reason: ${reason}`));
+  await ctx.send(buildSuccessCard(
+    "Balance Updated",
+    `${name}'s balance adjusted by ${days > 0 ? "+" : ""}${days} days.\nNew balance: ${updated.leave_balance} days.\nReason: ${reason}`
+  ));
 
   if (employee.teams_id) {
     await sendBalanceAdjustedNotification(nctx, employee.teams_id, name, days, updated.leave_balance, reason, ctx.userName);
@@ -356,7 +404,7 @@ export async function handleSetBalance(
   ctx:  CommandContext,
   nctx: NotificationContext
 ): Promise<void> {
-  const match = ctx.userMessage.match(/set balance\s+(.+?)\s+(\d+(?:\.\d+)?)/i);
+  const match = ctx.userMessage.match(/set\s+balance\s+(.+?)\s+(\d+(?:\.\d+)?)/i);
   if (!match) {
     await ctx.send(buildErrorCard("Usage: `set balance [name] [days]`"));
     return;
@@ -376,14 +424,17 @@ export async function handleSetBalance(
   await ctx.send(buildSuccessCard("Balance Set", `${name}'s balance set to ${targetDays} days.`));
 
   if (employee.teams_id) {
-    await sendBalanceAdjustedNotification(nctx, employee.teams_id, name, diff, targetDays, `Balance set to ${targetDays} days by HR`, ctx.userName);
+    await sendBalanceAdjustedNotification(
+      nctx, employee.teams_id, name, diff, targetDays,
+      `Balance set to ${targetDays} days by HR`, ctx.userName
+    );
   }
 }
 
 // ── reset balances [year] ─────────────────────────────────────────────────
 
 export async function handleResetBalances(ctx: CommandContext): Promise<void> {
-  const yearMatch = ctx.userMessage.match(/reset balances\s+(\d{4})/i);
+  const yearMatch = ctx.userMessage.match(/reset\s+balances\s+(\d{4})/i);
   const year      = yearMatch ? parseInt(yearMatch[1]) : new Date().getFullYear();
   const all       = await getAllEmployees();
   let   count     = 0;
@@ -394,7 +445,10 @@ export async function handleResetBalances(ctx: CommandContext): Promise<void> {
     count++;
   }
 
-  await ctx.send(buildSuccessCard("Balances Reset", `${count} employee balances reset to 22 days for ${year}.`));
+  await ctx.send(buildSuccessCard(
+    "Balances Reset",
+    `${count} employee balances reset to 22 days for ${year}.`
+  ));
 }
 
 // ── add leave for [name] [type] [date] ────────────────────────────────────
@@ -403,15 +457,19 @@ export async function handleAddLeaveOnBehalf(
   ctx:  CommandContext,
   nctx: NotificationContext
 ): Promise<void> {
-  const match = ctx.userMessage.match(/add leave for\s+(.+?)\s+(WFH|LEAVE|SICK|MATERNITY|PATERNITY|MARRIAGE|ADOPTION)\s+(\d{4}-\d{2}-\d{2})(?:\s+to\s+(\d{4}-\d{2}-\d{2}))?/i);
+  const match = ctx.userMessage.match(
+    /add\s+leave\s+for\s+(.+?)\s+(WFH|LEAVE|SICK|MATERNITY|PATERNITY|MARRIAGE|ADOPTION)\s+(\d{4}-\d{2}-\d{2})(?:\s+to\s+(\d{4}-\d{2}-\d{2}))?/i
+  );
   if (!match) {
-    await ctx.send(buildErrorCard("Usage: `add leave for [name] [type] [YYYY-MM-DD]`\nExample: `add leave for Rithika MR SICK 2026-01-10`"));
+    await ctx.send(buildErrorCard(
+      "Usage: `add leave for [name] [type] [YYYY-MM-DD]`\n" +
+      "Example: `add leave for Rithika MR SICK 2026-01-10`"
+    ));
     return;
   }
 
   const [, name, type, date, endDate] = match;
   const employee = await findEmployee(name);
-
   if (!employee) { await ctx.send(buildErrorCard(`Employee ${name} not found.`)); return; }
 
   await addLeaveRequest({
@@ -434,7 +492,10 @@ export async function handleAddLeaveOnBehalf(
     details:         `Added ${type} on ${date}${endDate ? ` to ${endDate}` : ""} on behalf of ${name}`,
   });
 
-  await ctx.send(buildSuccessCard("Leave Added", `${type} leave added for ${name} on ${formatDisplayDate(date)}. Auto-approved.`));
+  await ctx.send(buildSuccessCard(
+    "Leave Added",
+    `${type} leave added for ${name} on ${formatDisplayDate(date)}. Auto-approved.`
+  ));
 
   if (employee.teams_id) {
     await sendStatusCardToEmployee(nctx, employee.teams_id, "", "", type, formatDisplayDate(date), "Approved", ctx.userName);
@@ -448,13 +509,16 @@ export async function handleHRApproveLeave(
   ctx:  CommandContext,
   nctx: NotificationContext
 ): Promise<void> {
-  const match = ctx.userMessage.match(/approve leave\s+(.+?)\s+(\d{4}-\d{2}-\d{2})/i);
+  const match = ctx.userMessage.match(/approve\s+leave\s+(.+?)\s+(\d{4}-\d{2}-\d{2})/i);
   if (!match) { await ctx.send(buildErrorCard("Usage: `approve leave [name] [YYYY-MM-DD]`")); return; }
 
   const [, name, date] = match;
   const updated        = await updateLeaveStatus(name, date, "Approved", ctx.userName);
 
-  if (!updated) { await ctx.send(buildErrorCard(`No pending request found for ${name} on ${formatDisplayDate(date)}.`)); return; }
+  if (!updated) {
+    await ctx.send(buildErrorCard(`No pending request found for ${name} on ${formatDisplayDate(date)}.`));
+    return;
+  }
 
   await ctx.send(buildSuccessCard("Approved", `${name}'s request on ${formatDisplayDate(date)} approved.`));
 
@@ -472,13 +536,16 @@ export async function handleHRRejectLeave(
   ctx:  CommandContext,
   nctx: NotificationContext
 ): Promise<void> {
-  const match = ctx.userMessage.match(/reject leave\s+(.+?)\s+(\d{4}-\d{2}-\d{2})\s+(.+)/i);
+  const match = ctx.userMessage.match(/reject\s+leave\s+(.+?)\s+(\d{4}-\d{2}-\d{2})\s+(.+)/i);
   if (!match) { await ctx.send(buildErrorCard("Usage: `reject leave [name] [YYYY-MM-DD] [reason]`")); return; }
 
   const [, name, date, reason] = match;
   const updated                = await updateLeaveStatus(name, date, "Rejected", ctx.userName, reason);
 
-  if (!updated) { await ctx.send(buildErrorCard(`No pending request found for ${name} on ${formatDisplayDate(date)}.`)); return; }
+  if (!updated) {
+    await ctx.send(buildErrorCard(`No pending request found for ${name} on ${formatDisplayDate(date)}.`));
+    return;
+  }
 
   await ctx.send(buildSuccessCard("Rejected", `${name}'s request on ${formatDisplayDate(date)} rejected. Reason: ${reason}`));
 
@@ -494,7 +561,7 @@ export async function handleHRDeleteRequest(
   ctx:  CommandContext,
   nctx: NotificationContext
 ): Promise<void> {
-  const match = ctx.userMessage.match(/delete request\s+(.+?)\s+(\d{4}-\d{2}-\d{2})/i);
+  const match = ctx.userMessage.match(/delete\s+request\s+(.+?)\s+(\d{4}-\d{2}-\d{2})/i);
   if (!match) { await ctx.send(buildErrorCard("Usage: `delete request [name] [YYYY-MM-DD]`")); return; }
 
   const [, name, date] = match;
@@ -502,7 +569,10 @@ export async function handleHRDeleteRequest(
   const records        = await getLeaveRequestsByEmployee(name);
   const record         = records.find((r) => r.date === date);
 
-  if (!record) { await ctx.send(buildErrorCard(`No request found for ${name} on ${formatDisplayDate(date)}.`)); return; }
+  if (!record) {
+    await ctx.send(buildErrorCard(`No request found for ${name} on ${formatDisplayDate(date)}.`));
+    return;
+  }
 
   const reason  = "Deleted by HR";
   const deleted = await deleteLeaveRequest(name, date, ctx.userName, reason);
@@ -513,7 +583,7 @@ export async function handleHRDeleteRequest(
 
   if (employee) {
     const approverTeamsId = employee.role === "teamlead"
-      ? employee.manager_teams_id ?? ""
+      ? employee.manager_teams_id  ?? ""
       : employee.teamlead_teams_id ?? "";
 
     await sendDeleteNotifications(
@@ -526,12 +596,11 @@ export async function handleHRDeleteRequest(
 // ── restore request [name] [date] ─────────────────────────────────────────
 
 export async function handleRestoreRequest(ctx: CommandContext): Promise<void> {
-  const match = ctx.userMessage.match(/restore request\s+(.+?)\s+(\d{4}-\d{2}-\d{2})/i);
+  const match = ctx.userMessage.match(/restore\s+request\s+(.+?)\s+(\d{4}-\d{2}-\d{2})/i);
   if (!match) { await ctx.send(buildErrorCard("Usage: `restore request [name] [YYYY-MM-DD]`")); return; }
 
   const [, name, date] = match;
 
-  // Find deleted record and restore to Pending
   const { PrismaClient } = await import("@prisma/client");
   const prisma = new PrismaClient();
   const record = await prisma.leaveRequest.findFirst({
@@ -542,7 +611,11 @@ export async function handleRestoreRequest(ctx: CommandContext): Promise<void> {
     },
   });
 
-  if (!record) { await ctx.send(buildErrorCard(`No deleted request found for ${name} on ${formatDisplayDate(date)}.`)); await prisma.$disconnect(); return; }
+  if (!record) {
+    await ctx.send(buildErrorCard(`No deleted request found for ${name} on ${formatDisplayDate(date)}.`));
+    await prisma.$disconnect();
+    return;
+  }
 
   await prisma.leaveRequest.update({
     where: { id: record.id },
@@ -557,7 +630,10 @@ export async function handleRestoreRequest(ctx: CommandContext): Promise<void> {
   });
 
   await prisma.$disconnect();
-  await ctx.send(buildSuccessCard("Restored", `${name}'s ${record.type} request on ${formatDisplayDate(date)} restored to Pending.`));
+  await ctx.send(buildSuccessCard(
+    "Restored",
+    `${name}'s ${record.type} request on ${formatDisplayDate(date)} restored to Pending.`
+  ));
 }
 
 // ── add holiday [date] [name] ─────────────────────────────────────────────
@@ -566,7 +642,7 @@ export async function handleAddHoliday(
   ctx:  CommandContext,
   nctx: NotificationContext
 ): Promise<void> {
-  const match = ctx.userMessage.match(/add holiday\s+(\d{4}-\d{2}-\d{2})\s+(.+)/i);
+  const match = ctx.userMessage.match(/add\s+holiday\s+(\d{4}-\d{2}-\d{2})\s+(.+)/i);
   if (!match) { await ctx.send(buildErrorCard("Usage: `add holiday YYYY-MM-DD [Holiday Name]`")); return; }
 
   const [, date, name] = match;
@@ -581,11 +657,11 @@ export async function handleEditHoliday(
   ctx:  CommandContext,
   nctx: NotificationContext
 ): Promise<void> {
-  const match = ctx.userMessage.match(/edit holiday\s+(\d{4}-\d{2}-\d{2})\s+(.+)/i);
+  const match = ctx.userMessage.match(/edit\s+holiday\s+(\d{4}-\d{2}-\d{2})\s+(.+)/i);
   if (!match) { await ctx.send(buildErrorCard("Usage: `edit holiday YYYY-MM-DD [New Name]`")); return; }
 
   const [, date, newName] = match;
-  await addHoliday(date, newName, ctx.userName); // upsert updates name
+  await addHoliday(date, newName, ctx.userName);
   await ctx.send(buildSuccessCard("Holiday Updated", `Holiday on ${formatDisplayDate(date)} renamed to ${newName}.`));
   await sendHolidayNotificationToAll(nctx, date, newName, ctx.userName, "edited");
 }
@@ -596,21 +672,26 @@ export async function handleRescheduleHoliday(
   ctx:  CommandContext,
   nctx: NotificationContext
 ): Promise<void> {
-  const match = ctx.userMessage.match(/reschedule holiday\s+(.+?)\s+to\s+(\d{4}-\d{2}-\d{2})/i);
-  if (!match) { await ctx.send(buildErrorCard("Usage: `reschedule holiday [Holiday Name] to YYYY-MM-DD`")); return; }
+  const match = ctx.userMessage.match(/reschedule\s+holiday\s+(.+?)\s+to\s+(\d{4}-\d{2}-\d{2})/i);
+  if (!match) {
+    await ctx.send(buildErrorCard("Usage: `reschedule holiday [Holiday Name] to YYYY-MM-DD`"));
+    return;
+  }
 
   const [, holidayName, newDate] = match;
 
-  // Find the holiday by name
   const { PrismaClient } = await import("@prisma/client");
   const prisma = new PrismaClient();
   const existing = await prisma.holiday.findFirst({
     where: { name: { contains: holidayName, mode: "insensitive" } },
   });
 
-  if (!existing) { await ctx.send(buildErrorCard(`No holiday found named "${holidayName}".`)); await prisma.$disconnect(); return; }
+  if (!existing) {
+    await ctx.send(buildErrorCard(`No holiday found named "${holidayName}".`));
+    await prisma.$disconnect();
+    return;
+  }
 
-  // Delete old, create new
   await prisma.holiday.delete({ where: { id: existing.id } });
   await prisma.$disconnect();
 
@@ -632,15 +713,19 @@ export async function handleDeleteHoliday(
   ctx:  CommandContext,
   nctx: NotificationContext
 ): Promise<void> {
-  const match = ctx.userMessage.match(/delete holiday\s+(\d{4}-\d{2}-\d{2})/i);
+  const match = ctx.userMessage.match(/delete\s+holiday\s+(\d{4}-\d{2}-\d{2})/i);
   if (!match) { await ctx.send(buildErrorCard("Usage: `delete holiday YYYY-MM-DD`")); return; }
 
   const date = match[1];
   const { PrismaClient } = await import("@prisma/client");
-  const prisma = new PrismaClient();
+  const prisma   = new PrismaClient();
   const existing = await prisma.holiday.findUnique({ where: { date } });
 
-  if (!existing) { await ctx.send(buildErrorCard(`No holiday found on ${formatDisplayDate(date)}.`)); await prisma.$disconnect(); return; }
+  if (!existing) {
+    await ctx.send(buildErrorCard(`No holiday found on ${formatDisplayDate(date)}.`));
+    await prisma.$disconnect();
+    return;
+  }
 
   await prisma.holiday.delete({ where: { date } });
   await prisma.$disconnect();
@@ -656,26 +741,298 @@ export async function handleDeleteHoliday(
   await sendHolidayNotificationToAll(nctx, date, existing.name, ctx.userName, "deleted");
 }
 
+export async function handleAddMultipleHolidays(ctx: CommandContext): Promise<void> {
+  const match = ctx.userMessage.match(/add\s+multiple\s+holidays\s+/i);
+  if (!match){await ctx.send(buildErrorCard("Usage:\nadd multiple holidays\nYYYY-MM-DD Holiday Name\n...")); return; }
+
+  
+  const lines = ctx.userMessage
+    .replace(/^add multiple holidays/i, "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) {
+    await ctx.send(buildErrorCard(
+      "Usage:\nadd multiple holidays\nYYYY-MM-DD Holiday Name\n..."
+    ));
+    return;
+  }
+
+  let added = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  for (const line of lines) {
+    const match = line.match(/^(\d{4}-\d{2}-\d{2})\s+(.+)$/);
+
+    if (!match) {
+      skipped++;
+      continue;
+    }
+
+    const [, date, name] = match;
+
+    try {
+      const existing = await isHoliday(date);
+
+      if (existing) {
+        // ✅ Override (update name)
+        //await updateHoliday(date, name, ctx.userName);
+        updated++;
+      } else {
+        await addHoliday(date, name, ctx.userName);
+        added++;
+      }
+
+    } catch {
+      skipped++;
+    }
+  }
+
+  await ctx.send(buildSuccessCard(
+    "Holidays Updated",
+    `Added: ${added}\nUpdated: ${updated}\nSkipped: ${skipped}`
+  ));
+}
+
+// ── Clear All Holidays ──────────────────────────────────────────
+
+export async function handleClearHolidays(ctx: CommandContext): Promise<void> {
+  
+
+  const match = ctx.userMessage.match(/clear\s+all\s+holidays\s+/i);
+  if (!match){await ctx.send(buildErrorCard("Usage:\nclear all holidays")); return; }
+
+  const count = await clearAllHolidays(ctx.userName);
+
+  await ctx.send(
+    count === 0
+      ? "No holidays found to clear."
+      : `All holidays cleared successfully (${count} removed).`
+  );
+}
+
+
+// ── add employee ───────────────────────────────────────────────────────────
+// Usage: add employee name: X | email: X | role: X | bot_role: employee | teamlead: X | manager: X | leave_balance: 22
+
+export async function handleAddEmployee(ctx: CommandContext): Promise<void> {
+  // Parse pipe-separated key: value fields (case-insensitive keys)
+  const body   = ctx.userMessage.replace(/^add\s+employee\s*/i, "");
+  const fields: Record<string, string> = {};
+
+  for (const part of body.split("|")) {
+    const colonIdx = part.indexOf(":");
+    if (colonIdx === -1) continue;
+    const key = part.slice(0, colonIdx).trim().toLowerCase().replace(/\s+/g, "_");
+    const val = part.slice(colonIdx + 1).trim();
+    if (key && val) fields[key] = val;
+  }
+
+  const required = ["name", "email", "role", "bot_role"];
+  const missing  = required.filter((r) => !fields[r]);
+  if (missing.length) {
+    await ctx.send(buildErrorCard(
+      `Missing required field(s): ${missing.join(", ")}\n\n` +
+      `Usage:\nadd employee name: Priya Sharma | email: priya@company.com | role: Software Engineer | bot_role: employee | teamlead: Rithika MR | manager: Anil Kumar | leave_balance: 22\n\n` +
+      `bot_role options: employee, approver, hr`
+    ));
+    return;
+  }
+
+  // Validate bot_role
+  const validRoles = ["employee", "approver", "hr"];
+  if (!validRoles.includes(fields.bot_role.toLowerCase())) {
+    await ctx.send(buildErrorCard(`Invalid bot_role "${fields.bot_role}". Must be one of: employee, approver, hr`));
+    return;
+  }
+
+  // Check for duplicate
+  const existing = await findEmployee(fields.name);
+  if (existing) {
+    await ctx.send(buildErrorCard(
+      `Employee "${fields.name}" already exists.\nUse: update employee ${fields.name} [field] [value]`
+    ));
+    return;
+  }
+
+  // Resolve teams_ids for reporting lines
+  const allEmps = await getAllEmployees();
+  const tl  = allEmps.find((e) => e.name.toLowerCase() === fields.teamlead?.toLowerCase());
+  const mgr = allEmps.find((e) => e.name.toLowerCase() === fields.manager?.toLowerCase());
+
+await upsertEmployee({
+  name:              fields.name,
+  email:             fields.email,
+  role:              fields.role,
+  bot_role:          fields.bot_role.toLowerCase() as "employee" | "approver" | "hr",
+
+  teamlead:          fields.teamlead ?? null,
+  manager:           fields.manager ?? null,
+
+  teamlead_email:    tl?.email ?? null,
+  manager_email:     mgr?.email ?? null,
+
+  teamlead_teams_id: tl?.teams_id ?? null,
+  manager_teams_id:  mgr?.teams_id ?? null,
+
+  leave_balance:     parseFloat(fields.leave_balance ?? "22"),
+  carry_forward:     parseFloat(fields.carry_forward ?? "0"),
+
+  year_entitlement_start: new Date().getFullYear(),  teams_id:          fields.teams_id ?? null,
+});
+
+  await appendAuditLog({
+    hr_name:         ctx.userName,
+    action:          "add_employee",
+    target_employee: fields.name,
+    details:         `Added ${fields.name} as ${fields.bot_role} (${fields.role})`,
+  });
+
+  await ctx.send(buildSuccessCard(
+    "Employee Added",
+    `${fields.name} added successfully.\n\n` +
+    `Role: ${fields.role} | Bot role: ${fields.bot_role}\n` +
+    `Balance: ${fields.leave_balance ?? 22} days\n\n` +
+    `Note: teams_id will auto-register when ${fields.name} sends their first message to the bot.`
+  ));
+}
+
+// ── update employee [name] [field] [value] ────────────────────────────────
+// Usage: update employee Rithika MR bot_role approver
+// Fields: name, email, role, bot_role, manager, teamlead, teams_id,
+//         leave_balance, carry_forward
+
+export async function handleUpdateEmployee(ctx: CommandContext): Promise<void> {
+  const UPDATABLE_FIELDS = [
+    "name", "email", "role", "bot_role",
+    "manager", "teamlead", "teams_id",
+    "leave_balance", "carry_forward",
+  ];
+
+  // Build a regex that matches any known field name (case-insensitive)
+  const fieldPattern = UPDATABLE_FIELDS.join("|");
+  const match = ctx.userMessage.match(
+    new RegExp(`update\\s+employee\\s+(.+?)\\s+(${fieldPattern})\\s+(.+)`, "i")
+  );
+
+  if (!match) {
+    await ctx.send(buildErrorCard(
+      "Usage: `update employee [name] [field] [value]`\n\n" +
+      `Fields: ${UPDATABLE_FIELDS.join(", ")}\n\n` +
+      "Examples:\n" +
+      "  update employee Priya Sharma bot_role approver\n" +
+      "  update employee Priya Sharma role Senior Engineer\n" +
+      "  update employee Priya Sharma manager Anil Kumar\n" +
+      "  update employee Priya Sharma leave_balance 18"
+    ));
+    return;
+  }
+
+  const [, name, field, value] = match;
+  const fieldLower = field.toLowerCase();
+
+  const employee = await findEmployee(name);
+  if (!employee) { await ctx.send(buildErrorCard(`Employee "${name}" not found.`)); return; }
+
+  // Validate bot_role changes
+  if (fieldLower === "bot_role") {
+    const validRoles = ["employee", "approver", "hr"];
+    if (!validRoles.includes(value.toLowerCase())) {
+      await ctx.send(buildErrorCard(`Invalid bot_role "${value}". Must be one of: employee, approver, hr`));
+      return;
+    }
+  }
+
+  // Build the update payload
+  const allEmps = await getAllEmployees();
+  const updates: Record<string, any> = { [fieldLower]: value };
+
+  // When changing teamlead/manager, also update the corresponding teams_id
+  if (fieldLower === "teamlead") {
+    const tl = allEmps.find((e) => e.name.toLowerCase() === value.toLowerCase());
+    updates.teamlead_teams_id = tl?.teams_id ?? null;
+  }
+  if (fieldLower === "manager") {
+    const mgr = allEmps.find((e) => e.name.toLowerCase() === value.toLowerCase());
+    updates.manager_teams_id = mgr?.teams_id ?? null;
+  }
+
+  // Coerce numeric fields
+  if (fieldLower === "leave_balance" || fieldLower === "carry_forward") {
+    updates[fieldLower] = parseFloat(value);
+  }
+
+  await upsertEmployee({ ...employee, ...updates });
+
+  await appendAuditLog({
+    hr_name:         ctx.userName,
+    action:          "update_employee",
+    target_employee: name,
+    details:         `Updated ${fieldLower} → "${value}"`,
+  });
+
+  // Extra note for reporting-line changes: update affected reportees
+  let note = "";
+  if (fieldLower === "bot_role" || fieldLower === "teamlead" || fieldLower === "manager") {
+    note = `\n\nRemember: if other employees report to ${name}, update their teamlead/manager fields too.`;
+  }
+
+  await ctx.send(buildSuccessCard(
+    "Employee Updated",
+    `${name} — ${fieldLower} updated to "${value}".${note}`
+  ));
+}
+
+// ── deactivate employee [name] ────────────────────────────────────────────
+
+export async function handleDeactivateEmployee(ctx: CommandContext): Promise<void> {
+  const nameMatch = ctx.userMessage.match(/deactivate\s+employee\s+(.+)/i);
+  const name      = nameMatch ? nameMatch[1].trim() : "";
+
+  if (!name) { await ctx.send(buildErrorCard("Usage: `deactivate employee [name]`")); return; }
+
+  const employee = await findEmployee(name);
+  if (!employee) { await ctx.send(buildErrorCard(`Employee "${name}" not found.`)); return; }
+
+  if (!(employee as any).is_active) {
+    await ctx.send(buildErrorCard(`${name} is already inactive.`));
+    return;
+  }
+
+  await upsertEmployee({ ...employee, is_active: false } as any);
+
+  await appendAuditLog({
+    hr_name:         ctx.userName,
+    action:          "deactivate_employee",
+    target_employee: name,
+    details:         `Deactivated ${name} — marked inactive`,
+  });
+
+  await ctx.send(buildSuccessCard(
+    "Employee Deactivated",
+    `${name} has been marked inactive.\n\n` +
+    `They will no longer appear in org chart, team lists, or receive notifications.\n` +
+    `Their historical leave records are preserved.\n\n` +
+    `To reactivate: update employee ${name} is_active true`
+  ));
+}
+
 // ── download report [month] [year] ────────────────────────────────────────
 
 export async function handleDownloadReport(ctx: CommandContext): Promise<void> {
-  const monthNames = ["january","february","march","april","may","june","july","august","september","october","november","december"];
-
-  let month = new Date().getMonth() + 1;
-  let year  = new Date().getFullYear();
-
-  for (let i = 0; i < monthNames.length; i++) {
-    if (ctx.cmd.includes(monthNames[i])) { month = i + 1; break; }
-  }
+  const monthInfo = extractMonth(ctx.cmd);
   const yearMatch = ctx.userMessage.match(/\b(20\d{2})\b/);
-  if (yearMatch) year = parseInt(yearMatch[1]);
+  const isYtd     = /ytd|year.to.date/i.test(ctx.cmd);
 
-  const isYtd = /ytd|year.to.date/i.test(ctx.cmd);
+  const year  = yearMatch ? parseInt(yearMatch[1]) : new Date().getFullYear();
+  const month = monthInfo ? parseInt(monthInfo.mm) : new Date().getMonth() + 1;
+  const mm    = String(month).padStart(2, "0");
+  const yyyy  = String(year);
 
-  const all     = await getAllLeaveRequests();
-  const emps    = await getAllEmployees();
-  const mm      = String(month).padStart(2, "0");
-  const yyyy    = String(year);
+  const all  = await getAllLeaveRequests();
+  const emps = await getAllEmployees();
 
   const filtered = isYtd
     ? all.filter((r) => r.date.startsWith(yyyy))
@@ -683,32 +1040,43 @@ export async function handleDownloadReport(ctx: CommandContext): Promise<void> {
 
   const rows = emps.map((emp) => {
     const empRecords = filtered.filter((r) => r.employee === emp.name);
-    const leaveTaken = empRecords.filter((r) => r.type !== "WFH" && r.status === "Approved").reduce((s, r) => s + r.days_count, 0);
-    const wfhDays    = empRecords.filter((r) => r.type === "WFH" && r.status === "Approved").reduce((s, r) => s + r.days_count, 0);
-    const pending    = empRecords.filter((r) => r.status === "Pending").reduce((s, r) => s + r.days_count, 0);
-    const closing    = Math.max(0, emp.leave_balance);
-    const opening    = closing + leaveTaken;
+    const leaveTaken = empRecords
+      .filter((r) => r.type !== "WFH" && r.status === "Approved")
+      .reduce((s, r) => s + r.days_count, 0);
+    const wfhDays = empRecords
+      .filter((r) => r.type === "WFH" && r.status === "Approved")
+      .reduce((s, r) => s + r.days_count, 0);
+    const pending = empRecords
+      .filter((r) => r.status === "Pending")
+      .reduce((s, r) => s + r.days_count, 0);
+    const closing = Math.max(0, emp.leave_balance);
+    const opening = closing + leaveTaken;
 
     return {
-      "Employee Name":    emp.name,
-      "Month":            isYtd ? yyyy : `${yyyy}-${mm}`,
-      "Opening Balance":  opening,
-      "Leave Taken":      leaveTaken,
-      "WFH Days":         wfhDays,
-      "Pending":          pending,
-      "Closing Balance":  closing,
+      "Employee Name":   emp.name,
+      "Month":           isYtd ? yyyy : `${yyyy}-${mm}`,
+      "Opening Balance": opening,
+      "Leave Taken":     leaveTaken,
+      "WFH Days":        wfhDays,
+      "Pending":         pending,
+      "Closing Balance": closing,
     };
   });
 
-  const wb  = XLSX.utils.book_new();
-  const ws  = XLSX.utils.json_to_sheet(rows);
+  const wb         = XLSX.utils.book_new();
+  const ws         = XLSX.utils.json_to_sheet(rows);
   XLSX.utils.book_append_sheet(wb, ws, "Report");
 
-  const reportName = isYtd ? `LeaveReport_YTD_${yyyy}.xlsx` : `LeaveReport_${yyyy}_${mm}.xlsx`;
+  const reportName = isYtd
+    ? `LeaveReport_YTD_${yyyy}.xlsx`
+    : `LeaveReport_${yyyy}_${mm}.xlsx`;
   const outPath    = path.join(process.cwd(), "data", reportName);
-  XLSX.writeFile(wb, outPath); 
+  XLSX.writeFile(wb, outPath);
 
-  await ctx.send(`📊 Report generated in Path. Open this file from the data folder.`);
+  await ctx.send(buildSuccessCard(
+    "Report Generated",
+    `File saved: data/${reportName}\nOpen from the data folder on the server.`
+  ));
 }
 
 // ── remind approvers ───────────────────────────────────────────────────────
@@ -721,14 +1089,14 @@ export async function handleRemindApprovers(
   const now        = new Date();
   const monthLabel = now.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
 
-  const approverGroups: Record<string, any[]> = {};
   const allEmps = await getAllEmployees();
+  const approverGroups: Record<string, any[]> = {};
 
   for (const r of records) {
-    const emp       = allEmps.find((e) => e.name.toLowerCase() === r.employee.toLowerCase());
+    const emp = allEmps.find((e) => e.name.toLowerCase() === r.employee.toLowerCase());
     if (!emp) continue;
-    const approverTeamsId = emp.role === "teamlead" ? emp.manager_teams_id : emp.teamlead_teams_id;
-    const approverName    = emp.role === "teamlead" ? emp.manager          : emp.teamlead;
+    const approverTeamsId = emp.role === "teamlead" ? emp.manager_teams_id  : emp.teamlead_teams_id;
+    const approverName    = emp.role === "teamlead" ? emp.manager           : emp.teamlead;
     if (!approverTeamsId || !approverName) continue;
     if (!approverGroups[approverTeamsId]) approverGroups[approverTeamsId] = [];
     approverGroups[approverTeamsId].push({ approverName, approverTeamsId, record: r });
@@ -742,19 +1110,19 @@ export async function handleRemindApprovers(
   }));
 
   await sendApproverReminders(groups, monthLabel);
-  await ctx.send(buildSuccessCard("Reminders Sent", `Reminders sent to ${groups.length} approver(s) with pending requests.`));
+  await ctx.send(buildSuccessCard(
+    "Reminders Sent",
+    `Reminders sent to ${groups.length} approver(s) with pending requests.`
+  ));
 }
 
-// ── who is on leave [date/range] — full org ───────────────────────────────
+// ── who is on leave / wfh — full org (HR) ────────────────────────────────
 
 export async function handleHRWhoIsOnLeave(ctx: CommandContext): Promise<void> {
-  //const { approverHandlers } = await import("./approveHandlers.js");
-  // reuse approver handler but without team scoping
+  const ctxWithOverride = { ...ctx, role: { ...ctx.role, botRole: "hr" as const } };
+  await handleWhoIsOnLeave(ctxWithOverride, false);
 }
 
 export async function handleHRWhoIsOnLeaveImpl(ctx: CommandContext): Promise<void> {
-  const { handleWhoIsOnLeave } = await import("./approveHandlers.js");
-  // Call with scopeToTeam=false for HR
-  const ctxWithOverride = { ...ctx, role: { ...ctx.role, botRole: "hr" as const } };
-  await handleWhoIsOnLeave(ctxWithOverride, false);
+  await handleHRWhoIsOnLeave(ctx);
 }

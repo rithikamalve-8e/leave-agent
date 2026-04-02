@@ -47,7 +47,7 @@ export async function handleHolidays(ctx: CommandContext): Promise<void> {
     "july","august","september","october","november","december",
   ];
 
-  const cmd = ctx.cmd;
+  const cmd = ctx.cmd.toLowerCase();
   let month: number | undefined;
   let year:  number | undefined;
   let monthLabel: string | undefined;
@@ -72,7 +72,7 @@ export async function handleHolidays(ctx: CommandContext): Promise<void> {
     monthLabel = undefined; // card will show "Upcoming Holidays"
       }
     console.log(`[handleHolidays] calling getHolidays(${month}, ${year})`);
-    const holidays = await getHolidays(year);
+    const holidays = await getHolidays(month,year);
     console.log(`[handleHolidays] got ${holidays.length} holidays back`);
 
     const label = monthLabel ?? `${new Date().getFullYear()}`;  // "2026" if no month typed

@@ -23,8 +23,6 @@ import {
   buildDeletedNotificationCard,
   buildHolidayAnnouncementCard,
   formatDisplayDate,
-  getTypeEmoji,
-  getTypeLabel,
   LeaveRecord,
 } from "./cards";
 
@@ -233,7 +231,7 @@ export async function sendStatusCardToEmployee(
   fallbackSend?:    Function
 ): Promise<void> {
   const ref          = await getConversationRef(employeeTeamsId);
-  const cardContent  = buildStatusCardContent(requestType, displayDate, status, approverName, rejectionReason);
+  const cardContent  = buildStatusCardContent(requestType,  status, approverName, displayDate, rejectionReason);
   const isSameUser   = employeeTeamsId === approverTeamsId;
   const hasDifferentConv = ref?.conversationId && ref.conversationId !== currentConvId;
 
@@ -350,7 +348,7 @@ export async function sendHRAlert(
 
 /**
  * Builds and sends the plain-text announcement to the group channel after approval.
- * e.g. "📅 Rithika MR will be working from home today."
+ * e.g. " Rithika MR will be working from home today."
  */
 export async function sendApprovalAnnouncement(
   ctx:          NotificationContext,
@@ -358,7 +356,8 @@ export async function sendApprovalAnnouncement(
   requestType:  string,
   date:         string,
   displayDate:  string,
-  endDate?:     string | null
+  endDate?:     string | null,
+  duration?:    string
 ): Promise<void> {
   const typePhrase =
     requestType === "WFH"       ? "working from home"   :
@@ -373,8 +372,8 @@ export async function sendApprovalAnnouncement(
   const datePhrase = date === todayStr ? "today" : `on ${displayDate}`;
 
   const message = endDate && endDate !== date
-    ? `📅 ${employeeName} will be ${typePhrase} from ${displayDate} to ${formatDisplayDate(endDate)}.`
-    : `📅 ${employeeName} will be ${typePhrase} ${datePhrase}.`;
+    ? ` ${employeeName} will be ${typePhrase} from ${displayDate} to ${formatDisplayDate(endDate)}.`
+    : ` ${employeeName} will be ${typePhrase} ${datePhrase} for ${duration}.`;
 
   await sendAnnouncementText(ctx, message);
 }

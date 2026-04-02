@@ -126,6 +126,7 @@ async function migrateLeaveRequests() {
       where: {
         employee: { equals: employee, mode: "insensitive" },
         date,
+        duration: row.duration,
         type: row.type?.toString().trim() ?? "LEAVE",
       },
     });
@@ -188,18 +189,14 @@ async function migrateConversationRefs() {
           conversationId: ref.conversationId,
           serviceUrl:     ref.serviceUrl,
           tenantId:       ref.tenantId ?? null,
-          botId:          ref.botId,
-          isPersonal:     ref.isPersonal ?? false,
-        },
+          botId:          ref.botId,        },
         create: {
           userId,
           userName:       ref.userName,
           conversationId: ref.conversationId,
           serviceUrl:     ref.serviceUrl,
           tenantId:       ref.tenantId ?? null,
-          botId:          ref.botId,
-          isPersonal:     ref.isPersonal ?? false,
-        },
+          botId:          ref.botId,        },
       });
       console.log(`  ✅ ${ref.userName}`);
       imported++;

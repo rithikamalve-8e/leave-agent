@@ -59,6 +59,11 @@ import {
   handleDownloadReport,
   handleRemindApprovers,
   handleHRWhoIsOnLeaveImpl,
+  handleAddEmployee,
+  handleUpdateEmployee,
+  handleDeactivateEmployee,
+  handleAddMultipleHolidays,
+  handleClearHolidays,
 } from "./handlers/hrHandlers";
 
 // ── Command Definition ─────────────────────────────────────────────────────
@@ -302,6 +307,16 @@ const commands: CommandDef[] = [
     handler: handleDeleteHoliday,
   },
   {
+  match: (cmd) => /^add multiple holidays/i.test(cmd),
+  roles: ["hr"],
+  handler: handleAddMultipleHolidays,
+  },
+  {
+  match: (cmd) => /^clear all holidays/i.test(cmd),
+  roles: ["hr"],
+  handler: handleClearHolidays,
+  },
+  {
     match:   (cmd) => /^download report|^report\s+/i.test(cmd),
     roles:   ["hr"],
     handler: handleDownloadReport,
@@ -310,6 +325,21 @@ const commands: CommandDef[] = [
     match:   (cmd) => cmd === "remind approvers",
     roles:   ["hr"],
     handler: handleRemindApprovers,
+  },
+  {
+  match: (cmd) => /^add employee/i.test(cmd),
+  roles: ["hr"],
+  handler: handleAddEmployee,
+  },
+  {
+  match: (cmd) => /^update employee/i.test(cmd),
+  roles: ["hr"],
+  handler: handleUpdateEmployee,
+  },
+  {
+  match: (cmd) => /^deactivate employee/i.test(cmd),
+  roles: ["hr"],
+  handler: handleDeactivateEmployee,
   },
 ];
 
